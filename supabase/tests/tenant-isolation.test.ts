@@ -33,11 +33,10 @@ beforeAll(async () => {
   orgA = await create(adminA, 'Org A');
   orgB = await create(adminB, 'Org B');
 
-  await asUser(adminA, (c) =>
-    c.query(
-      `insert into public.memberships (org_id, user_id, role) values ($1, $2, 'requester'), ($1, $3, 'auditor')`,
-      [orgA, requesterA, auditorA],
-    ),
+  // Members normally join through an invitation (see admin.test.ts).
+  await pool.query(
+    `insert into public.memberships (org_id, user_id, role) values ($1, $2, 'requester'), ($1, $3, 'auditor')`,
+    [orgA, requesterA, auditorA],
   );
 
   // Rows that only the backend can create.
@@ -132,7 +131,7 @@ describe('cross-tenant writes', () => {
             userId,
           ]),
         ),
-      ).rejects.toThrow(/row-level security/);
+      ).rejects.toThrow(/permission denied/);
     }
   });
 
@@ -211,14 +210,17 @@ describe('least privilege inside one organization', () => {
     );
     expect(promote.rowCount).toBe(0);
 
-    await expect(
-      asUser(requesterA, (c) =>
-        c.query(`insert into public.memberships (org_id, user_id, role) values ($1, $2, 'reviewer')`, [
-          orgA,
-          outsider,
-        ]),
-      ),
-    ).rejects.toThrow(/row-level security/);
+    // Nobody adds members directly, not even the org admin: people join by invitation.
+    for (const userId of [requesterA, adminA]) {
+      await expect(
+        asUser(userId, (c) =>
+          c.query(`insert into public.memberships (org_id, user_id, role) values ($1, $2, 'reviewer')`, [
+            orgA,
+            outsider,
+          ]),
+        ),
+      ).rejects.toThrow(/permission denied/);
+    }
 
     await expect(
       asUser(requesterA, (c) =>
@@ -304,7 +306,8 @@ describe('audit log', () => {
       'membership.created',
       'membership.role_changed',
     ]);
-    expect(rows.every((r) => r.actor_id === adminA)).toBe(true);
+    // The two members were added by the test set-up, outside any session.
+    expect(rows.map((r) => r.actor_id)).toEqual([adminA, adminA, null, null, adminA]);
     expect(rows.at(-1)!.metadata).toEqual({ from: 'requester', to: 'reviewer' });
   });
 

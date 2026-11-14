@@ -44,12 +44,10 @@ beforeAll(async () => {
     const { rows } = await c.query<{ id: string }>(`select public.create_organization('Org A') as id`);
     return rows[0]!.id;
   });
-  await asUser(admin, (c) =>
-    c.query(
-      `insert into public.memberships (org_id, user_id, role)
-       values ($1, $2, 'process_manager'), ($1, $3, 'requester'), ($1, $4, 'requester'), ($1, $5, 'auditor')`,
-      [org, manager, requester, colleague, auditor],
-    ),
+  await pool.query(
+    `insert into public.memberships (org_id, user_id, role)
+     values ($1, $2, 'process_manager'), ($1, $3, 'requester'), ($1, $4, 'requester'), ($1, $5, 'auditor')`,
+    [org, manager, requester, colleague, auditor],
   );
   draft = await asUser(requester, async (c) => {
     const { rows } = await c.query<{ id: string }>(

@@ -66,12 +66,6 @@ describe('email + password without TOTP', () => {
 
     await expect(
       asSession(admin, PASSWORD_ONLY, (c) =>
-        c.query(`insert into public.memberships (org_id, user_id, role) values ($1, $2, 'requester')`, [org, newcomer]),
-      ),
-    ).rejects.toThrow(/row-level security/);
-
-    await expect(
-      asSession(admin, PASSWORD_ONLY, (c) =>
         c.query(`insert into public.verified_domains (org_id, domain) values ($1, 'b.example')`, [org]),
       ),
     ).rejects.toThrow(/row-level security/);
