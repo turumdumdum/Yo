@@ -1,4 +1,4 @@
-import type { Answers, StageDecision, StageStatus } from '@app/shared';
+import type { AiRemark, AiStatus, AiSuggestion, Answers, StageDecision, StageStatus } from '@app/shared';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type RequestStatus = 'draft' | 'submitted' | 'in_review' | 'approved' | 'rejected';
@@ -140,23 +140,50 @@ export class SubmitError extends Error {
   }
 }
 
-/** Submission goes through our API, which validates the answers and computes the risk tier. */
-export async function submitRequest(supabase: SupabaseClient, id: string): Promise<void> {
+async function callApi(supabase: SupabaseClient, path: string, method: 'GET' | 'POST'): Promise<Response> {
   const apiUrl = import.meta.env.VITE_API_URL;
   if (!apiUrl) throw new SubmitError('The API address is not configured. Set VITE_API_URL in apps/web/.env.');
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new SubmitError('Your session has expired. Sign in again.');
-  let res: Response;
   try {
-    res = await fetch(`${apiUrl.replace(/\/+$/, '')}/v1/requests/${id}/submit`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}` },
-    });
+    return await fetch(`${apiUrl.replace(/\/+$/, '')}${path}`, { method, headers: { authorization: `Bearer ${token}` } });
   } catch {
     throw new SubmitError('Could not reach the API. Check that it is running and try again.');
   }
-  if (res.ok) return;
+}
+
+async function apiError(res: Response, fallback: string): Promise<SubmitError> {
   const body = (await res.json().catch(() => null)) as { error?: string; fields?: Record<string, string> } | null;
-  throw new SubmitError(body?.error ?? 'The request could not be submitted.', body?.fields);
+  return new SubmitError(body?.error ?? fallback, body?.fields);
+}
+
+/** Submission goes through our API, which validates the answers and computes the risk tier. */
+export async function submitRequest(supabase: SupabaseClient, id: string): Promise<void> {
+  const res = await callApi(supabase, `/v1/requests/${id}/submit`, 'POST');
+  if (!res.ok) throw await apiError(res, 'The request could not be submitted.');
+}
+
+const AI_OFF: AiStatus = { enabled: false, provider: null };
+
+/** Whether the optional AI plugin is configured. Any failure simply means "no AI". */
+export async function aiStatus(supabase: SupabaseClient): Promise<AiStatus> {
+  try {
+    const res = await callApi(supabase, '/v1/ai', 'GET');
+    return res.ok ? ((await res.json()) as AiStatus) : AI_OFF;
+  } catch {
+    return AI_OFF;
+  }
+}
+
+export async function aiSuggestions(supabase: SupabaseClient, id: string): Promise<AiSuggestion[]> {
+  const res = await callApi(supabase, `/v1/requests/${id}/ai/suggestions`, 'POST');
+  if (!res.ok) throw await apiError(res, 'The AI could not suggest anything.');
+  return ((await res.json()) as { suggestions: AiSuggestion[] }).suggestions;
+}
+
+export async function aiCheck(supabase: SupabaseClient, id: string): Promise<AiRemark[]> {
+  const res = await callApi(supabase, `/v1/requests/${id}/ai/check`, 'POST');
+  if (!res.ok) throw await apiError(res, 'The AI could not check the answers.');
+  return ((await res.json()) as { remarks: AiRemark[] }).remarks;
 }

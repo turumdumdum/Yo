@@ -786,3 +786,51 @@ fieldset.field {
   font-size: 16px;
   margin: 16px 0 8px;
 }
+
+/* Optional AI assistance */
+.ai-assist {
+  border: 1px dashed #9aa7e8;
+  background: var(--accent-tint);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin: 0 0 20px;
+}
+.ai-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+.form-card .ai-assist h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.ai-list {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+.ai-list li {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.ai-list p {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+.ai-list .form-actions {
+  margin-top: 8px;
+}
+.suggested-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--status-review-bg);
+  color: var(--status-review-fg);
+}

@@ -10,8 +10,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
+import { AiAssist } from './AiAssist';
 import { AnswerSummary } from './AnswerSummary';
-import { deleteDraft, saveAnswers, submitRequest, SubmitError } from './api';
+import { aiStatus, deleteDraft, saveAnswers, submitRequest, SubmitError } from './api';
 import { FieldInput } from './FieldInput';
 
 const AUTOSAVE_DELAY_MS = 1500;
@@ -42,6 +43,18 @@ export function RequestForm({ supabase, requestId, initialAnswers, onSubmitted, 
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [busy, setBusy] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  // Name of the AI provider when the optional plugin is configured; null means no AI buttons.
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void aiStatus(supabase).then((status) => {
+      if (!cancelled && status.enabled) setAiProvider(status.provider ?? 'the AI provider');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
 
   // The latest answers and the last version known to be stored, for the autosave timer.
   const latest = useRef(answers);
@@ -190,6 +203,18 @@ export function RequestForm({ supabase, requestId, initialAnswers, onSubmitted, 
             void (step === LAST_STEP ? submit() : next());
           }}
         >
+          {aiProvider && step <= 1 && (
+            <AiAssist
+              supabase={supabase}
+              requestId={requestId}
+              provider={aiProvider}
+              mode="suggest"
+              answers={answers}
+              save={save}
+              onApply={change}
+            />
+          )}
+
           {visibleFields(step, answers).map((field) => (
             <FieldInput
               key={field.key}
@@ -212,6 +237,17 @@ export function RequestForm({ supabase, requestId, initialAnswers, onSubmitted, 
                     ))}
                   </ul>
                 </section>
+              )}
+              {aiProvider && (
+                <AiAssist
+                  supabase={supabase}
+                  requestId={requestId}
+                  provider={aiProvider}
+                  mode="check"
+                  answers={answers}
+                  save={save}
+                  onApply={change}
+                />
               )}
               <h2>Your answers</h2>
               <AnswerSummary answers={answers} onEdit={(index) => void goTo(index)} />

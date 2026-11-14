@@ -323,6 +323,22 @@ export function validateAnswers(answers: Answers, stepIndexes?: readonly number[
   return { errors, cleaned };
 }
 
+/**
+ * Normalizes one proposed value for a field (for example an AI suggestion).
+ * Returns undefined when the field is unknown or the value is not acceptable.
+ */
+export function normalizeAnswer(key: string, raw: unknown): unknown {
+  const field = findField(key);
+  if (!field) return undefined;
+  const checked = checkField(field, raw);
+  return 'value' in checked ? checked.value : undefined;
+}
+
+/** Label of a form field, or undefined for an unknown key. */
+export function fieldLabel(key: string): string | undefined {
+  return findField(key)?.label;
+}
+
 /** Index of the first step that has a validation error, or -1. */
 export function firstStepWithErrors(errors: Record<string, string>): number {
   return REQUEST_FORM_STEPS.findIndex((step) => step.fields.some((f) => f.key in errors));

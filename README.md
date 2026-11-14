@@ -11,14 +11,17 @@ Open-source vendor intake and due-diligence service. A requester submits a reque
 | Sign-in | Email + password with mandatory TOTP, enforced in the database. Google sign-in is not configured yet |
 | Organizations | Create an organization, roles, one organization per self-hosted installation |
 | Request form | 7 steps with autosave, conditional fields, server-side validation and automatic risk tier. No file attachments yet |
-| Triage and stages | Submission starts the default review stages required by the risk tier, each with an SLA due date. Read-only for now |
+| Triage and stages | Submission starts the default review stages required by the risk tier, each with an SLA due date |
+| Reviews | Reviewer assignment, per-stage checklist and relevant answers, approve / approve with conditions / reject, automatic final decision, review queue |
+| Admin | Members and roles, invitations by one-time link, setting for reviewing your own request |
+| AI plugin (optional) | Off by default. With your own Parallel API key: vendor lookup with suggested values, and a check of the answers. Other providers can be plugged in |
 | `packages/shared` | Product vocabulary, form definition and validation, triage risk-tier engine |
 | `supabase/` | Migrations with Row Level Security on every table, tenant-isolation tests |
 | `apps/api` | Hono API (request submission) with Node and Cloudflare Workers entrypoints |
 | `apps/web` | React + Vite app |
 | `deploy/`, `ee/` | Placeholders |
 
-Not built yet: reviewer queue and decisions, info requests, invitations, notifications, password recovery, rate limiting, self-host Docker Compose.
+Not built yet: info requests to the requester, email (invitations are sent by hand as a link), notifications, file attachments, password recovery, Google sign-in, vendor registry, self-host Docker Compose. The API has no general rate limiting yet.
 
 ## Repository layout
 

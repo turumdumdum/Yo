@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
+import type { AiProvider } from './ai/provider';
+import { aiRoutes } from './ai/routes';
 import { requestRoutes, type RequestStore } from './requests';
 
 // Platform-neutral application. Only Web-standard APIs here: anything specific to
@@ -10,6 +12,8 @@ export interface AppOptions {
   /** Origin of the web app, the only one allowed to call the API from a browser. */
   webOrigin?: string;
   requests?: RequestStore;
+  /** Optional AI plugin. Off unless configured; the core works without it. */
+  ai?: AiProvider;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -33,7 +37,10 @@ export function createApp(options: AppOptions = {}) {
 
   app.get('/health', (c) => c.json({ status: 'ok' }));
 
-  if (options.requests) app.route('/v1/requests', requestRoutes(options.requests));
+  if (options.requests) {
+    app.route('/v1/requests', requestRoutes(options.requests));
+    app.route('/v1', aiRoutes(options.requests, options.ai));
+  }
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404));
 
