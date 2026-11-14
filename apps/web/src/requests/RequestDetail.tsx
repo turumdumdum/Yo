@@ -1,11 +1,19 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { RequestStatusBadge, RiskBadge } from '../components/Badge';
 import { AnswerSummary } from './AnswerSummary';
 import type { RequestRow } from './api';
+import { StageList } from './StageList';
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
-export function RequestDetail({ request, onClose }: { request: RequestRow; onClose: () => void }) {
+interface Props {
+  supabase: SupabaseClient;
+  request: RequestRow;
+  onClose: () => void;
+}
+
+export function RequestDetail({ supabase, request, onClose }: Props) {
   return (
     <div className="request-form">
       <div className="form-top">
@@ -33,7 +41,14 @@ export function RequestDetail({ request, onClose }: { request: RequestRow; onClo
               ))}
             </ul>
           )}
-          <p className="field-hint">Review stages are not built yet, so nothing happens to this request after submission.</p>
+        </section>
+      )}
+
+      {request.status !== 'draft' && (
+        <section className="card" aria-labelledby="stages-heading">
+          <h2 id="stages-heading">Review stages</h2>
+          <StageList supabase={supabase} requestId={request.id} />
+          <p className="field-hint">Reviewers cannot record decisions yet; the reviewer queue is the next step.</p>
         </section>
       )}
 

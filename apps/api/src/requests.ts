@@ -1,4 +1,12 @@
-import { computeRiskTier, riskInputFromAnswers, validateAnswers, type Answers, type RiskResult } from '@app/shared';
+import {
+  computeRiskTier,
+  planStages,
+  riskInputFromAnswers,
+  validateAnswers,
+  type Answers,
+  type PlannedStage,
+  type RiskResult,
+} from '@app/shared';
 import { Hono } from 'hono';
 
 // Request submission. Drafts are edited straight from the browser under RLS; this endpoint
@@ -31,8 +39,8 @@ export interface RequestStore {
    * caller may see, so null means "does not exist for this user".
    */
   getAsUser(accessToken: string, requestId: string): Promise<DraftRecord | null>;
-  /** Marks a draft as submitted. Runs with backend privileges. */
-  submit(requestId: string, answers: Answers, risk: RiskResult): Promise<SubmittedRecord>;
+  /** Marks a draft as submitted and starts its stages, atomically. Runs with backend privileges. */
+  submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[]): Promise<SubmittedRecord>;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -62,9 +70,11 @@ export function requestRoutes(store: RequestStore) {
       return c.json({ error: 'Some answers are missing or invalid', fields: errors }, 422);
     }
 
+    // Triage: the tier decides which review stages start.
     const risk = computeRiskTier(riskInputFromAnswers(cleaned));
+    const stages = planStages(risk.tier, cleaned, new Date());
     try {
-      const submitted = await store.submit(id, cleaned, risk);
+      const submitted = await store.submit(id, cleaned, risk, stages);
       return c.json({
         id: submitted.id,
         status: submitted.status,

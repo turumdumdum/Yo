@@ -1,4 +1,4 @@
-import type { Answers, RiskResult } from '@app/shared';
+import type { Answers, PlannedStage, RiskResult } from '@app/shared';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type SubmittedRecord } from './requests';
 
 export interface SupabaseConfig {
@@ -26,7 +26,7 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
       return rows[0] ?? null;
     },
 
-    async submit(requestId: string, answers: Answers, risk: RiskResult): Promise<SubmittedRecord> {
+    async submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[]): Promise<SubmittedRecord> {
       const res = await fetchImpl(`${rest}/rpc/submit_request`, {
         method: 'POST',
         headers: {
@@ -40,6 +40,13 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
           p_risk_tier: risk.tier,
           p_risk_score: risk.score,
           p_risk_reasons: risk.reasons,
+          p_stages: stages.map((stage) => ({
+            name: stage.name,
+            status: stage.status,
+            note: stage.note,
+            sla_business_days: stage.slaBusinessDays,
+            sla_due_at: stage.slaDueAt,
+          })),
         }),
       });
       if (!res.ok) {

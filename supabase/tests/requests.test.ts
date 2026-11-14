@@ -16,13 +16,22 @@ const answers = JSON.stringify({ serviceName: 'Acme Analytics', requestType: 'Ne
 const visibleIds = (userId: string) =>
   asUser(userId, async (c) => (await c.query<{ id: string }>('select id from public.requests')).rows.map((r) => r.id));
 
-const submit = (requestId: string) =>
+const STAGES = JSON.stringify([
+  { name: 'License check', status: 'In review', note: null, sla_business_days: 5, sla_due_at: '2026-11-20T15:30:00Z' },
+  { name: 'Security review', status: 'In review', note: null, sla_business_days: 5, sla_due_at: '2026-11-20T15:30:00Z' },
+  { name: 'Finance review', status: 'Not required', note: 'Not required: Paid or free is Free', sla_business_days: null, sla_due_at: null },
+]);
+
+const submit = (requestId: string, stages = STAGES) =>
   asService((c) =>
-    c.query(`select (public.submit_request($1, $2, 'High', 7, '["Data classification: Confidential (+3)"]')).status`, [
-      requestId,
-      answers,
-    ]),
+    c.query(
+      `select (public.submit_request($1, $2, 'High', 7, '["Data classification: Confidential (+3)"]', $3)).status`,
+      [requestId, answers, stages],
+    ),
   );
+
+const visibleStages = (userId: string) =>
+  asUser(userId, async (c) => (await c.query('select name, status from public.request_stages order by position')).rows);
 
 beforeAll(async () => {
   await resetDatabase();
@@ -98,7 +107,7 @@ describe('drafts', () => {
       ).rejects.toThrow(/permission denied/);
     }
     await expect(
-      asUser(requester, (c) => c.query(`select public.submit_request($1, '{}', 'Low', 0, '[]')`, [draft])),
+      asUser(requester, (c) => c.query(`select public.submit_request($1, '{}', 'Low', 0, '[]', '[]')`, [draft])),
     ).rejects.toThrow(/permission denied/);
   });
 
@@ -147,12 +156,56 @@ describe('submitted requests', () => {
       'select status, request_type, risk_tier, risk_score, submitted_at is not null as stamped from public.requests where id = $1',
       [draft],
     );
-    expect(rows[0]).toEqual({ status: 'submitted', request_type: 'New vendor', risk_tier: 'High', risk_score: 7, stamped: true });
+    expect(rows[0]).toEqual({ status: 'in_review', request_type: 'New vendor', risk_tier: 'High', risk_score: 7, stamped: true });
     const audit = await pool.query(
       `select actor_id, metadata from public.audit_log where action = 'request.submitted' and entity_id = $1`,
       [draft],
     );
-    expect(audit.rows).toEqual([{ actor_id: requester, metadata: { risk_tier: 'High', risk_score: 7 } }]);
+    expect(audit.rows).toEqual([
+      {
+        actor_id: requester,
+        metadata: { risk_tier: 'High', risk_score: 7, stages: ['License check', 'Security review'] },
+      },
+    ]);
+  });
+
+  it('start their review stages in the same step, in order', async () => {
+    const { rows } = await pool.query(
+      `select position, name, status, note, sla_business_days, sla_due_at, org_id = $2 as same_org
+       from public.request_stages where request_id = $1 order by position`,
+      [draft, org],
+    );
+    expect(rows).toEqual([
+      { position: 1, name: 'License check', status: 'In review', note: null, sla_business_days: 5, sla_due_at: new Date('2026-11-20T15:30:00Z'), same_org: true },
+      { position: 2, name: 'Security review', status: 'In review', note: null, sla_business_days: 5, sla_due_at: new Date('2026-11-20T15:30:00Z'), same_org: true },
+      { position: 3, name: 'Finance review', status: 'Not required', note: 'Not required: Paid or free is Free', sla_business_days: null, sla_due_at: null, same_org: true },
+    ]);
+  });
+
+  it('show their stages to exactly the people who can see the request', async () => {
+    for (const viewer of [requester, admin, manager, auditor]) {
+      expect((await visibleStages(viewer)).map((s) => s.name)).toEqual(['License check', 'Security review', 'Finance review']);
+    }
+    expect(await visibleStages(colleague)).toEqual([]);
+  });
+
+  it('are not submitted at all when the stages are missing or invalid', async () => {
+    const another = await asUser(colleague, async (c) => {
+      const { rows } = await c.query<{ id: string }>(`insert into public.requests (org_id, answers) values ($1, $2) returning id`, [org, answers]);
+      return rows[0]!.id;
+    });
+    await expect(submit(another, '[]')).rejects.toThrow(/at least one stage/);
+    await expect(submit(another, JSON.stringify([{ name: 'X', status: 'Done' }]))).rejects.toThrow(/check constraint/);
+    await expect(
+      submit(another, JSON.stringify([{ name: 'X', status: 'In review' }, { name: 'X', status: 'In review' }])),
+    ).rejects.toThrow(/duplicate key/);
+    const { rows } = await pool.query(
+      `select status, (select count(*)::int from public.request_stages s where s.request_id = r.id) as stages
+       from public.requests r where id = $1`,
+      [another],
+    );
+    expect(rows[0]).toEqual({ status: 'draft', stages: 0 });
+    await pool.query('delete from public.requests where id = $1', [another]);
   });
 
   it('cannot be submitted twice', async () => {

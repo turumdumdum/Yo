@@ -597,3 +597,41 @@ fieldset.field {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Review stages */
+.progress-text {
+  margin: 0 0 6px;
+  color: var(--ink-secondary);
+}
+.progress-line {
+  display: block;
+  width: 100%;
+  height: 8px;
+  margin-bottom: 8px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--status-idle-bg);
+  accent-color: var(--accent);
+}
+.progress-line::-webkit-progress-bar {
+  background: var(--status-idle-bg);
+}
+.progress-line::-webkit-progress-value {
+  background: var(--accent);
+}
+.progress-line::-moz-progress-bar {
+  background: var(--accent);
+}
+.stage-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.stage-name {
+  font-weight: 600;
+}
+.stage-meta {
+  font-size: 14px;
+  color: var(--ink-tertiary);
+}

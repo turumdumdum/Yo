@@ -1,4 +1,4 @@
-import type { Answers, RiskResult } from '@app/shared';
+import type { Answers, PlannedStage, RiskResult } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore } from './requests';
@@ -38,18 +38,18 @@ const complete: Answers = {
 };
 
 function setup(draft: DraftRecord | null, overrides: Partial<RequestStore> = {}) {
-  const calls: { id: string; answers: Answers; risk: RiskResult }[] = [];
+  const calls: { id: string; answers: Answers; risk: RiskResult; stages: PlannedStage[] }[] = [];
   const tokens: string[] = [];
   const store: RequestStore = {
     async getAsUser(token) {
       tokens.push(token);
       return draft;
     },
-    async submit(id, answers, risk) {
-      calls.push({ id, answers, risk });
+    async submit(id, answers, risk, stages) {
+      calls.push({ id, answers, risk, stages });
       return {
         id,
-        status: 'submitted',
+        status: 'in_review',
         risk_tier: risk.tier,
         risk_score: risk.score,
         risk_reasons: risk.reasons,
@@ -70,12 +70,29 @@ describe('POST /v1/requests/:id/submit', () => {
     const res = await submit();
     expect(res.status).toBe(200);
     // Restricted 5 + production access 2 = 7 -> High.
-    expect(await res.json()).toMatchObject({ id: ID, status: 'submitted', riskTier: 'High', riskScore: 7 });
+    expect(await res.json()).toMatchObject({ id: ID, status: 'in_review', riskTier: 'High', riskScore: 7 });
     expect(tokens).toEqual(['user-token']);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.answers.serviceName).toBe('Acme Analytics');
     expect('annualCost' in calls[0]!.answers).toBe(false);
     expect('riskTier' in calls[0]!.answers).toBe(false);
+  });
+
+  it('starts the stages that the tier and answers require', async () => {
+    const { submit, calls } = setup({ id: ID, status: 'draft', answers: complete });
+    await submit();
+    const stages = calls[0]!.stages;
+    // High risk, free service: everything except the finance review.
+    expect(stages.filter((s) => s.status === 'In review').map((s) => s.name)).toEqual([
+      'License check',
+      'Security review',
+      'Legal review',
+      'IT review',
+    ]);
+    expect(stages.find((s) => s.name === 'Finance review')).toMatchObject({ status: 'Not required', slaDueAt: null });
+    const due = new Date(stages[0]!.slaDueAt!).getTime();
+    expect(due).toBeGreaterThan(Date.now() + 4 * 86_400_000);
+    expect(due).toBeLessThan(Date.now() + 8 * 86_400_000);
   });
 
   it('requires a bearer token', async () => {

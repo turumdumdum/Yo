@@ -15,6 +15,7 @@ export function RiskBadge({ tier }: { tier: string }) {
   return <Badge tone={RISK_TONES[tier] ?? 'idle'}>{`${tier} risk`}</Badge>;
 }
 
-export function RequestStatusBadge({ status }: { status: 'draft' | 'submitted' }) {
-  return status === 'draft' ? <Badge tone="idle">Draft</Badge> : <Badge tone="review">Submitted</Badge>;
+export function RequestStatusBadge({ status }: { status: 'draft' | 'submitted' | 'in_review' }) {
+  if (status === 'draft') return <Badge tone="idle">Draft</Badge>;
+  return <Badge tone="review">{status === 'in_review' ? 'In review' : 'Submitted'}</Badge>;
 }

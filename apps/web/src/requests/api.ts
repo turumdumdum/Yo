@@ -1,9 +1,10 @@
-import type { Answers } from '@app/shared';
+import type { Answers, StageStatus } from '@app/shared';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export interface RequestRow {
   id: string;
-  status: 'draft' | 'submitted';
+  /** 'submitted' only on requests sent before review stages existed. */
+  status: 'draft' | 'submitted' | 'in_review';
   service_name: string | null;
   request_type: string | null;
   risk_tier: string | null;
@@ -30,6 +31,27 @@ export async function loadRequest(supabase: SupabaseClient, id: string): Promise
   const { data, error } = await supabase.from('requests').select('*').eq('id', id).maybeSingle<RequestRow>();
   if (error) throw error;
   return data;
+}
+
+export interface StageRow {
+  id: string;
+  position: number;
+  name: string;
+  status: StageStatus;
+  note: string | null;
+  reviewer_id: string | null;
+  sla_due_at: string | null;
+  sla_paused: boolean;
+}
+
+export async function listStages(supabase: SupabaseClient, requestId: string): Promise<StageRow[]> {
+  const { data, error } = await supabase
+    .from('request_stages')
+    .select('id,position,name,status,note,reviewer_id,sla_due_at,sla_paused')
+    .eq('request_id', requestId)
+    .order('position');
+  if (error) throw error;
+  return data as StageRow[];
 }
 
 export async function createDraft(supabase: SupabaseClient, orgId: string): Promise<string> {

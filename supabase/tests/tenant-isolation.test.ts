@@ -4,7 +4,7 @@ import { asAnon, asUser, createUser, pool, resetDatabase } from './db';
 // Proves that org A cannot read or write org B's data (CLAUDE.md §8).
 // Every new tenant table must be added to TENANT_TABLES and get its own cases here.
 
-const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests'];
+const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages'];
 
 let adminA: string; // org admin of org A
 let requesterA: string; // requester in org A
@@ -58,6 +58,10 @@ beforeAll(async () => {
      values ($1, $2, 'submitted', '{"serviceName": "Tool A"}', 'Low', 0, now()),
             ($3, $4, 'submitted', '{"serviceName": "Tool B"}', 'Low', 0, now())`,
     [orgA, adminA, orgB, adminB],
+  );
+  await pool.query(
+    `insert into public.request_stages (org_id, request_id, position, name, status)
+     select r.org_id, r.id, 1, 'License check', 'In review' from public.requests r`,
   );
 });
 
@@ -173,6 +177,17 @@ describe('cross-tenant writes', () => {
     const del = await asUser(adminA, (c) => c.query(`delete from public.requests where org_id = $1`, [orgB]));
     expect(update.rowCount).toBe(0);
     expect(del.rowCount).toBe(0);
+  });
+
+  it('nobody can write request stages from the browser', async () => {
+    for (const sql of [
+      `insert into public.request_stages (org_id, request_id, position, name, status)
+       select org_id, id, 2, 'Fake', 'Approved' from public.requests`,
+      `update public.request_stages set status = 'Approved'`,
+      `delete from public.request_stages`,
+    ]) {
+      await expect(asUser(adminA, (c) => c.query(sql))).rejects.toThrow(/permission denied/);
+    }
   });
 
   it('org A admin cannot revoke org B invitations', async () => {

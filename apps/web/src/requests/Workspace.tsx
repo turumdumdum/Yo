@@ -77,7 +77,7 @@ export function Workspace({ supabase, user, orgId, canCreate }: Props) {
       />
     );
   }
-  if (open) return <RequestDetail request={open} onClose={close} />;
+  if (open) return <RequestDetail supabase={supabase} request={open} onClose={close} />;
 
   return (
     <section className="card" aria-labelledby="requests-heading">

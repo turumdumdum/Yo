@@ -21,6 +21,9 @@ The decisions behind this layout are in [CLAUDE.md](../CLAUDE.md) §3 and §8. T
 - The form is declared once in `packages/shared/src/requestForm.ts` as data (steps, fields, `showWhen` conditions). The web app renders it, and the API validates with the same definitions.
 - A draft is a row in `requests` that only its requester can see. The browser may write the `answers` column of its own drafts and nothing else: status, risk tier and requester are not grantable columns.
 - Submission goes through `POST /v1/requests/:id/submit`. The API reads the draft with the caller's own token (so RLS decides whether the caller may see it), validates and cleans the answers, computes the risk tier and calls the `submit_request` function with the service role. The function also writes the audit log entry.
+- Triage happens at submission: `planStages` in `packages/shared/src/workflow.ts` decides from the risk tier and the answers which of the default stages start (`In review`, with an SLA due date in business days) and which are `Not required` (with the reason). `submit_request` stores the stages in the same transaction, so a request is never in review without stages.
+- The browser can only read `request_stages`; whoever may see the request may see its stages. Reviewer assignment, decisions and info requests are not built yet.
+- The default workflow lives in code as a configuration object. The `workflow_templates` and `stage_definitions` tables from CLAUDE.md §4 arrive with the workflow builder; each stage row already stores its own name, order and SLA, so later template changes will not alter requests in flight.
 - Not implemented yet: rate limiting on the API (required by CLAUDE.md §8), file attachments, per-organization catalogs (categories, legal entities and cost centers are a starter list or free text).
 
 ## Risk tier
@@ -38,4 +41,5 @@ The decisions behind this layout are in [CLAUDE.md](../CLAUDE.md) §3 and §8. T
 
 - **Cost and currency.** The risk engine takes the annual cost as a plain number in the organization's base currency; currency conversion is not designed yet.
 - **Malware scanning of uploads** is an open gap (see SECURITY.md).
-- **Default risk weights** are a proposal and have not been approved as policy.
+- **Default risk weights and stage rules** are proposals and have not been approved as policy. Stage rules today: License check and IT review always; Finance review only for Paid services; Security and Legal review from Medium risk; 5 business days each.
+- **Business days** skip weekends only (UTC). Public holidays and time zones need per-organization calendars.
