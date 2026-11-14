@@ -4,7 +4,7 @@ import { asAnon, asUser, createUser, pool, resetDatabase } from './db';
 // Proves that org A cannot read or write org B's data (CLAUDE.md §8).
 // Every new tenant table must be added to TENANT_TABLES and get its own cases here.
 
-const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log'];
+const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests'];
 
 let adminA: string; // org admin of org A
 let requesterA: string; // requester in org A
@@ -51,6 +51,13 @@ beforeAll(async () => {
     `insert into public.verified_domains (org_id, domain, verified_at)
      values ($1, 'a.example', now()), ($2, 'b.example', now())`,
     [orgA, orgB],
+  );
+  // One submitted request per organization; request rules are covered in requests.test.ts.
+  await pool.query(
+    `insert into public.requests (org_id, requester_id, status, answers, risk_tier, risk_score, submitted_at)
+     values ($1, $2, 'submitted', '{"serviceName": "Tool A"}', 'Low', 0, now()),
+            ($3, $4, 'submitted', '{"serviceName": "Tool B"}', 'Low', 0, now())`,
+    [orgA, adminA, orgB, adminB],
   );
 });
 
@@ -153,6 +160,18 @@ describe('cross-tenant writes', () => {
       ),
     ).rejects.toThrow(/row-level security/);
     const del = await asUser(adminA, (c) => c.query(`delete from public.verified_domains where org_id = $1`, [orgB]));
+    expect(del.rowCount).toBe(0);
+  });
+
+  it('org A admin cannot create, change or delete requests in org B', async () => {
+    await expect(
+      asUser(adminA, (c) => c.query(`insert into public.requests (org_id, answers) values ($1, '{}')`, [orgB])),
+    ).rejects.toThrow(/row-level security/);
+    const update = await asUser(adminA, (c) =>
+      c.query(`update public.requests set answers = '{"serviceName": "Hacked"}' where org_id = $1`, [orgB]),
+    );
+    const del = await asUser(adminA, (c) => c.query(`delete from public.requests where org_id = $1`, [orgB]));
+    expect(update.rowCount).toBe(0);
     expect(del.rowCount).toBe(0);
   });
 

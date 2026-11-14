@@ -49,7 +49,7 @@ export const PASSWORD_ONLY: SessionClaims = { aal: 'aal1', amr: [{ method: 'pass
 /** Sign in with Google. */
 export const GOOGLE: SessionClaims = { aal: 'aal1', amr: [{ method: 'oauth' }] };
 
-async function inRole<T>(role: 'anon' | 'authenticated', claims: object | null, fn: Run<T>): Promise<T> {
+async function inRole<T>(role: 'anon' | 'authenticated' | 'service_role', claims: object | null, fn: Run<T>): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query('begin');
@@ -74,6 +74,9 @@ export const asUser = <T>(userId: string, fn: Run<T>) => asSession(userId, PASSW
 /** Like asUser, with explicit control over how the session was authenticated. */
 export const asSession = <T>(userId: string, session: SessionClaims, fn: Run<T>) =>
   inRole('authenticated', { sub: userId, ...session }, fn);
+
+/** Runs queries the way the API does with the service role key. */
+export const asService = <T>(fn: Run<T>) => inRole('service_role', null, fn);
 
 /** Runs queries as a visitor without a session. */
 export const asAnon = <T>(fn: Run<T>) => inRole('anon', null, fn);
