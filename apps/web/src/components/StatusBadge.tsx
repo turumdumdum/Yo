@@ -1,6 +1,5 @@
 import type { StageStatus } from '@app/shared';
-
-type Tone = 'approved' | 'waiting' | 'review' | 'idle' | 'rejected';
+import { Badge, type Tone } from './Badge';
 
 const TONES: Record<StageStatus, Tone> = {
   'Not started': 'idle',
@@ -12,11 +11,6 @@ const TONES: Record<StageStatus, Tone> = {
   'Not required': 'idle',
 };
 
-/** Status is always text plus colour, never colour alone. */
 export function StatusBadge({ status }: { status: StageStatus }) {
-  return (
-    <span className="status-badge" data-tone={TONES[status]}>
-      {status}
-    </span>
-  );
+  return <Badge tone={TONES[status]}>{status}</Badge>;
 }

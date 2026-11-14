@@ -4,6 +4,7 @@ import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { Field } from '../components/Field';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
+import { Workspace } from '../requests/Workspace';
 
 interface Membership {
   role: OrgRole;
@@ -51,18 +52,16 @@ export function OrgGate({ supabase, user }: { supabase: SupabaseClient; user: Us
 
   return (
     <>
-      <h1>{membership.organization.name}</h1>
-      <p className="lead">
-        Signed in as {user.email}. Your role: <strong>{ORG_ROLE_LABELS[membership.role]}</strong>.
+      <p className="org-line">
+        <strong>{membership.organization.name}</strong> · {ORG_ROLE_LABELS[membership.role]} · {membership.memberCount}{' '}
+        {membership.memberCount === 1 ? 'member' : 'members'} · {user.email}
       </p>
-      <section className="card" aria-labelledby="org-heading">
-        <h2 id="org-heading">Organization</h2>
-        <dl className="details">
-          <dt>Members</dt>
-          <dd>{membership.memberCount}</dd>
-        </dl>
-        <p className="field-hint">Invitations, the request form and the tracker are not built yet.</p>
-      </section>
+      <Workspace
+        supabase={supabase}
+        user={user}
+        orgId={membership.organization.id}
+        canCreate={membership.role !== 'auditor'}
+      />
     </>
   );
 }

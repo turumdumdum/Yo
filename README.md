@@ -8,13 +8,16 @@ Open-source vendor intake and due-diligence service. A requester submits a reque
 
 | Area | State |
 | --- | --- |
-| `packages/shared` | Product vocabulary, input schemas, triage risk-tier engine (tested) |
-| `supabase/` | First migration: organizations, memberships, invitations, verified domains, append-only audit log, all with Row Level Security; tenant-isolation tests |
-| `apps/api` | Hono skeleton (health check, security headers) with Node and Cloudflare Workers entrypoints |
-| `apps/web` | React + Vite shell with the design tokens |
+| Sign-in | Email + password with mandatory TOTP, enforced in the database. Google sign-in is not configured yet |
+| Organizations | Create an organization, roles, one organization per self-hosted installation |
+| Request form | 7 steps with autosave, conditional fields, server-side validation and automatic risk tier. No file attachments yet |
+| `packages/shared` | Product vocabulary, form definition and validation, triage risk-tier engine |
+| `supabase/` | Migrations with Row Level Security on every table, tenant-isolation tests |
+| `apps/api` | Hono API (request submission) with Node and Cloudflare Workers entrypoints |
+| `apps/web` | React + Vite app |
 | `deploy/`, `ee/` | Placeholders |
 
-Not built yet: sign-in, the request form, stages, tracker, notifications, self-host Docker Compose.
+Not built yet: review stages, tracker, invitations, notifications, password recovery, rate limiting, self-host Docker Compose.
 
 ## Repository layout
 
@@ -30,22 +33,25 @@ docs/              architecture notes, self-host guide
 
 ## Development
 
-Requires Node 22+ and pnpm 10+.
+Requires Node 22+, pnpm 10+ and a Supabase project with the migrations from `supabase/migrations/` applied.
 
 ```bash
 pnpm install
+cp apps/web/.env.example apps/web/.env   # then fill in the values
+cp apps/api/.env.example apps/api/.env   # then fill in the values
+pnpm dev           # web on http://localhost:5173, API on http://localhost:8787
 pnpm typecheck
 pnpm test          # unit tests (shared, api, web)
-pnpm dev:web       # http://localhost:5173
-pnpm dev:api       # http://localhost:8787/health
 ```
+
+The web app only ever receives the publishable key. The secret (service role) key belongs in `apps/api/.env` and must never be committed or given a `VITE_` name.
 
 ### Database tests
 
 The tenant-isolation tests run against any disposable Postgres 15+ database (a small shim stands in for Supabase's `auth` schema and roles). **The database is wiped on every run.**
 
 ```bash
-export TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/app_test
+export TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/app_test   # wiped on every run
 pnpm test:db
 ```
 

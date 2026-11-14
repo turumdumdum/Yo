@@ -16,6 +16,13 @@ The decisions behind this layout are in [CLAUDE.md](../CLAUDE.md) §3 and §8. T
 - An organization is created through the `public.create_organization` RPC, which also makes the caller the first org admin.
 - `audit_log` is append-only: triggers reject update, delete and truncate for every role, and the browser has no insert privilege. Membership changes are written to it by a trigger.
 
+## Requests
+
+- The form is declared once in `packages/shared/src/requestForm.ts` as data (steps, fields, `showWhen` conditions). The web app renders it, and the API validates with the same definitions.
+- A draft is a row in `requests` that only its requester can see. The browser may write the `answers` column of its own drafts and nothing else: status, risk tier and requester are not grantable columns.
+- Submission goes through `POST /v1/requests/:id/submit`. The API reads the draft with the caller's own token (so RLS decides whether the caller may see it), validates and cleans the answers, computes the risk tier and calls the `submit_request` function with the service role. The function also writes the audit log entry.
+- Not implemented yet: rate limiting on the API (required by CLAUDE.md §8), file attachments, per-organization catalogs (categories, legal entities and cost centers are a starter list or free text).
+
 ## Risk tier
 
 `computeRiskTier` scores a request from data classification, business criticality, production access and annual cost, then applies minimum-tier floors. The scoring configuration is a plain object so it can later be stored per organization and edited in the workflow builder. The default weights are a proposal and have not been approved as policy.

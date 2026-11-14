@@ -9,6 +9,7 @@
     "test": "pnpm -r --filter '!@app/db' test",
     "test:db": "pnpm --filter @app/db test",
     "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
     "dev:web": "pnpm --filter @app/web dev",
     "dev:api": "pnpm --filter @app/api dev"
   }
