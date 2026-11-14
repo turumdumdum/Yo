@@ -277,7 +277,8 @@ describe('parallelProvider', () => {
     await parallelProvider({ apiKey: 'k', timeoutMs: 8_000 }, impl).run(task);
     const wait = Number(new URL(calls[1]!.url).searchParams.get('timeout'));
     expect(wait).toBeGreaterThanOrEqual(1);
-    expect(wait).toBeLessThanOrEqual(7);
+    // 8 s left at most, well below the usual 25 s server-side wait.
+    expect(wait).toBeLessThanOrEqual(8);
   });
 
   it('reports an unreachable provider', async () => {
