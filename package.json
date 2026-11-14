@@ -1,0 +1,15 @@
+{
+  "name": "vendor-management",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --filter '!@app/db' test",
+    "test:db": "pnpm --filter @app/db test",
+    "build": "pnpm -r build",
+    "dev:web": "pnpm --filter @app/web dev",
+    "dev:api": "pnpm --filter @app/api dev"
+  }
+}
