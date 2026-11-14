@@ -296,7 +296,8 @@ describe('audit log', () => {
       c.query(`update public.memberships set role = 'reviewer' where org_id = $1 and user_id = $2`, [orgA, requesterA]),
     );
     const { rows } = await pool.query(
-      `select action, actor_id, metadata from public.audit_log where org_id = $1 order by id`,
+      `select action, actor_id, metadata from public.audit_log
+       where org_id = $1 and (action like 'organization.%' or action like 'membership.%') order by id`,
       [orgA],
     );
     expect(rows.map((r) => r.action)).toEqual([

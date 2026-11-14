@@ -756,8 +756,8 @@ fieldset.field {
   flex: 1 1 200px;
   overflow-wrap: anywhere;
 }
-.member-list select,
-#invite-role {
+.role-select,
+.filters input {
   min-height: var(--touch-target);
   padding: 6px 10px;
   font: inherit;
@@ -852,4 +852,89 @@ fieldset.field {
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 6px;
+}
+
+/* Admin: filters, import, domains */
+.filters {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .filters {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+.filters input,
+.filters select {
+  width: 100%;
+}
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.segmented button {
+  min-height: var(--touch-target);
+  padding: 6px 14px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  background: var(--surface);
+  border: 0;
+  cursor: pointer;
+}
+.segmented button[aria-pressed='true'] {
+  color: #ffffff;
+  background: var(--accent);
+}
+.format-help {
+  margin-bottom: 12px;
+}
+.format-help summary {
+  font-weight: 600;
+  min-height: 32px;
+  cursor: pointer;
+}
+.format-help pre {
+  background: var(--ground);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  overflow-x: auto;
+}
+.import-preview {
+  margin-top: 16px;
+}
+.problems {
+  color: #8c1d18;
+  font-size: 14px;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 12px;
+  font-size: 14px;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.domain-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+.domain-form .field,
+.domain-form .button {
+  margin-bottom: 16px;
 }

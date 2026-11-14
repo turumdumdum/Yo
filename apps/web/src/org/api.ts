@@ -5,7 +5,16 @@ export interface Organization {
   id: string;
   name: string;
   allow_self_review: boolean;
+  restrict_to_verified_domains: boolean;
 }
+
+export interface Domain {
+  id: string;
+  domain: string;
+  verified_at: string | null;
+}
+
+export type BulkInvitationResult = { email: string; role: OrgRole } & ({ token: string } | { error: string });
 
 export interface Membership {
   role: OrgRole;
@@ -29,7 +38,7 @@ export interface Invitation {
 export async function loadMembership(supabase: SupabaseClient, userId: string): Promise<Membership | null> {
   const { data, error } = await supabase
     .from('memberships')
-    .select('role, organizations(id, name, allow_self_review)')
+    .select('role, organizations(id, name, allow_self_review, restrict_to_verified_domains)')
     .eq('user_id', userId)
     .limit(1)
     .maybeSingle<{ role: OrgRole; organizations: Organization }>();
@@ -85,6 +94,43 @@ export async function acceptInvitation(supabase: SupabaseClient, token: string):
 
 export async function setAllowSelfReview(supabase: SupabaseClient, orgId: string, allow: boolean): Promise<void> {
   const { data, error } = await supabase.from('organizations').update({ allow_self_review: allow }).eq('id', orgId).select('id');
+  if (error) throw error;
+  if (data.length === 0) throw new Error('The setting could not be changed.');
+}
+
+export async function createInvitations(
+  supabase: SupabaseClient,
+  orgId: string,
+  rows: { email: string; role: OrgRole }[],
+): Promise<BulkInvitationResult[]> {
+  const { data, error } = await supabase.rpc('create_invitations', { p_org_id: orgId, p_invitations: rows });
+  if (error) throw error;
+  return data as BulkInvitationResult[];
+}
+
+export async function listDomains(supabase: SupabaseClient, orgId: string): Promise<Domain[]> {
+  const { data, error } = await supabase.from('verified_domains').select('id,domain,verified_at').eq('org_id', orgId).order('domain');
+  if (error) throw error;
+  return data as Domain[];
+}
+
+export async function addDomain(supabase: SupabaseClient, orgId: string, domain: string): Promise<void> {
+  const { error } = await supabase.from('verified_domains').insert({ org_id: orgId, domain });
+  if (error) throw error.code === '23505' ? new Error(`${domain} is already on the list.`) : error;
+}
+
+export async function removeDomain(supabase: SupabaseClient, id: string): Promise<void> {
+  const { data, error } = await supabase.from('verified_domains').delete().eq('id', id).select('id');
+  if (error) throw error;
+  if (data.length === 0) throw new Error('The domain could not be removed.');
+}
+
+export async function setRestrictToDomains(supabase: SupabaseClient, orgId: string, restrict: boolean): Promise<void> {
+  const { data, error } = await supabase
+    .from('organizations')
+    .update({ restrict_to_verified_domains: restrict })
+    .eq('id', orgId)
+    .select('id');
   if (error) throw error;
   if (data.length === 0) throw new Error('The setting could not be changed.');
 }

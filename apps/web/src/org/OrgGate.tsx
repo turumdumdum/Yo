@@ -22,7 +22,7 @@ export function OrgGate({ supabase, user }: { supabase: SupabaseClient; user: Us
         try {
           await acceptInvitation(supabase, token);
         } catch (error) {
-          setInviteError(`The invitation could not be accepted: ${errorMessage(error)}.`);
+          setInviteError(`The invitation could not be accepted. ${errorMessage(error)}`);
         }
       }
       setMembership(await loadMembership(supabase, user.id));
