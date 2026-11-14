@@ -156,3 +156,142 @@ a {
   background: var(--status-rejected-bg);
   color: var(--status-rejected-fg);
 }
+
+/* Header actions */
+.app-header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Forms */
+.auth-card {
+  max-width: 440px;
+  margin: 24px auto 0;
+  padding: 24px;
+}
+.auth-card h1 {
+  font-size: 24px;
+  margin-bottom: 12px;
+}
+.auth-card p {
+  color: var(--ink-secondary);
+  margin: 0 0 16px;
+}
+
+.field {
+  margin-bottom: 16px;
+}
+.field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.field input {
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid #8a94a3;
+  border-radius: 8px;
+}
+.field input[aria-invalid='true'] {
+  border-color: #b3261e;
+}
+.field-hint {
+  font-size: 14px;
+  color: var(--ink-tertiary);
+  margin: 0 0 6px;
+}
+.auth-card .field-hint {
+  color: var(--ink-tertiary);
+  margin-bottom: 6px;
+}
+.field-error,
+.form-error {
+  color: #8c1d18;
+  font-size: 14px;
+  margin: 6px 0 0;
+}
+.form-error {
+  background: #fbe9e7;
+  border: 1px solid #f1b5ae;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 16px;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch-target);
+  padding: 8px 18px;
+  font: inherit;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.button:hover {
+  background: var(--accent-dark);
+}
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.button-secondary {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--border);
+}
+.button-secondary:hover {
+  background: var(--accent-tint);
+}
+.auth-card form .button {
+  width: 100%;
+}
+
+.link-button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: var(--touch-target);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.auth-switch {
+  margin-top: 16px !important;
+}
+
+.qr-code {
+  display: block;
+  margin: 0 auto 12px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.secret {
+  word-break: break-all;
+  font-size: 13px;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0 0 12px;
+}
+.details dt {
+  color: var(--ink-tertiary);
+}
+.details dd {
+  margin: 0;
+  font-weight: 600;
+}

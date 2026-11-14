@@ -36,12 +36,25 @@ export async function resetDatabase(): Promise<void> {
 
 type Run<T> = (client: pg.PoolClient) => Promise<T>;
 
-async function inRole<T>(role: 'anon' | 'authenticated', userId: string | null, fn: Run<T>): Promise<T> {
+/** The parts of a Supabase access token that policies look at. */
+export interface SessionClaims {
+  aal: 'aal1' | 'aal2';
+  amr: { method: string }[];
+}
+
+/** Email + password followed by TOTP: the normal signed-in state. */
+export const PASSWORD_WITH_TOTP: SessionClaims = { aal: 'aal2', amr: [{ method: 'totp' }, { method: 'password' }] };
+/** Email + password without the second factor. */
+export const PASSWORD_ONLY: SessionClaims = { aal: 'aal1', amr: [{ method: 'password' }] };
+/** Sign in with Google. */
+export const GOOGLE: SessionClaims = { aal: 'aal1', amr: [{ method: 'oauth' }] };
+
+async function inRole<T>(role: 'anon' | 'authenticated', claims: object | null, fn: Run<T>): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query('begin');
     await client.query(`select set_config('request.jwt.claims', $1, true)`, [
-      userId ? JSON.stringify({ sub: userId, role }) : '',
+      claims ? JSON.stringify({ ...claims, role }) : '',
     ]);
     await client.query(`set local role ${role}`);
     const result = await fn(client);
@@ -55,8 +68,12 @@ async function inRole<T>(role: 'anon' | 'authenticated', userId: string | null, 
   }
 }
 
-/** Runs queries the way the browser does: as `authenticated` with the user's JWT. */
-export const asUser = <T>(userId: string, fn: Run<T>) => inRole('authenticated', userId, fn);
+/** Runs queries the way the browser does: as `authenticated` with the user's JWT (MFA passed). */
+export const asUser = <T>(userId: string, fn: Run<T>) => asSession(userId, PASSWORD_WITH_TOTP, fn);
+
+/** Like asUser, with explicit control over how the session was authenticated. */
+export const asSession = <T>(userId: string, session: SessionClaims, fn: Run<T>) =>
+  inRole('authenticated', { sub: userId, ...session }, fn);
 
 /** Runs queries as a visitor without a session. */
 export const asAnon = <T>(fn: Run<T>) => inRole('anon', null, fn);

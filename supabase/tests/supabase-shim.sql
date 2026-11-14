@@ -33,3 +33,11 @@ stable
 as $$
   select nullif(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub', '')::uuid;
 $$;
+
+create function auth.jwt()
+returns jsonb
+language sql
+stable
+as $$
+  select nullif(current_setting('request.jwt.claims', true), '')::jsonb;
+$$;
