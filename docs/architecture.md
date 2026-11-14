@@ -20,10 +20,15 @@ The decisions behind this layout are in [CLAUDE.md](../CLAUDE.md) §3 and §8. T
 
 `computeRiskTier` scores a request from data classification, business criticality, production access and annual cost, then applies minimum-tier floors. The scoring configuration is a plain object so it can later be stored per organization and edited in the workflow builder. The default weights are a proposal and have not been approved as policy.
 
+## Decisions recorded on 2026-11-14
+
+- **One organization per self-hosted installation.** `private.installation_settings.single_organization` is on by default and `create_organization` refuses a second organization. The hosted deployment turns it off with SQL; the browser cannot read or change the setting.
+- **Reviewer and Owner roles.** The organization-level role in `memberships` stays as the base role. Per-stage reviewer assignments and per-request owner assignments (budget, business, access, technical) are added when stages and requests are built.
+- **Organization deletion: anonymize the audit log.** When an organization is deleted on request, its audit entries are kept but anonymized (no user identifiers or personal data in them) instead of being deleted. Not implemented yet: today `audit_log.org_id` still blocks deleting an organization, and the append-only triggers block any change to existing entries. The deletion procedure must be a single audited server-side operation and needs its own tests.
+- **Frontend framework:** React, confirmed.
+
 ## Open design points
 
-- **Organization deletion vs the append-only audit log.** `audit_log.org_id` blocks deleting an organization that has audit entries. "Full export and deletion on request" needs an explicit, audited procedure; it is not designed yet.
-- **Reviewer and Owner roles.** They are stored as organization-level roles for now. The guide describes Reviewer as per stage and Owner as per request (budget, business, access, technical), which will need per-stage and per-request assignments.
-- **Self-host, one company per installation.** Nothing yet limits a self-hosted installation to a single organization.
 - **Cost and currency.** The risk engine takes the annual cost as a plain number in the organization's base currency; currency conversion is not designed yet.
 - **Malware scanning of uploads** is an open gap (see SECURITY.md).
+- **Default risk weights** are a proposal and have not been approved as policy.

@@ -16,6 +16,8 @@ let orgB: string;
 
 beforeAll(async () => {
   await resetDatabase();
+  // Isolation needs two organizations: run as the hosted, multi-tenant deployment.
+  await pool.query('update private.installation_settings set single_organization = false');
 
   adminA = await createUser('admin@a.example');
   requesterA = await createUser('requester@a.example');
