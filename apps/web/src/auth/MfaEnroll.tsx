@@ -1,15 +1,10 @@
 import { totpCodeSchema } from '@app/shared';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Field } from '../components/Field';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
-
-interface Enrollment {
-  factorId: string;
-  qrCode: string;
-  secret: string;
-}
+import { enrollTotp, type Enrollment } from './enrollTotp';
 
 /** Mandatory for email + password accounts: scan the QR code, then confirm with a code. */
 export function MfaEnroll({ supabase, onVerified }: { supabase: SupabaseClient; onVerified: () => void }) {
@@ -19,25 +14,19 @@ export function MfaEnroll({ supabase, onVerified }: { supabase: SupabaseClient; 
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // One enrolment per screen. React runs effects twice in development, and two parallel
+  // enrolments would race: the second one used to fail with "factor already exists".
+  const started = useRef<Promise<Enrollment> | null>(null);
+
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // Drop factors left over from an abandoned setup so the user always gets a fresh secret.
-        const { data: factors, error: listError } = await supabase.auth.mfa.listFactors();
-        if (listError) throw listError;
-        for (const factor of factors.all.filter((f) => f.factor_type === 'totp' && f.status === 'unverified')) {
-          await supabase.auth.mfa.unenroll({ factorId: factor.id });
-        }
-        const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp' });
-        if (error) throw error;
-        if (!cancelled) setEnrollment({ factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret });
-      } catch (error) {
-        if (!cancelled) setFormError(errorMessage(error));
-      }
-    })();
+    let active = true;
+    started.current ??= enrollTotp(supabase.auth.mfa);
+    started.current.then(
+      (result) => active && setEnrollment(result),
+      (error: unknown) => active && setFormError(errorMessage(error)),
+    );
     return () => {
-      cancelled = true;
+      active = false;
     };
   }, [supabase]);
 
