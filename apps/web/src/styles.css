@@ -1,0 +1,158 @@
+/* Design tokens from CLAUDE.md §10. */
+:root {
+  --ground: #f5f6f8;
+  --surface: #ffffff;
+  --border: #dde1e7;
+  --ink: #14181f;
+  --ink-secondary: #3d4654;
+  --ink-tertiary: #566070;
+  --accent: #2f4bd8;
+  --accent-dark: #1e34a8;
+  --accent-tint: #eef1fc;
+
+  --status-approved-bg: #ddf3e6;
+  --status-approved-fg: #14532d;
+  --status-waiting-bg: #fdf0d5;
+  --status-waiting-fg: #7a4a00;
+  --status-review-bg: #e1e7fb;
+  --status-review-fg: #1e34a8;
+  --status-idle-bg: #eceef2;
+  --status-idle-fg: #3d4654;
+  /* Rejected has no colour in the guide yet; placeholder pending the prototype. */
+  --status-rejected-bg: #fbe1e1;
+  --status-rejected-fg: #7f1d1d;
+
+  --font-body: 'Inter Variable', system-ui, sans-serif;
+  --font-heading: 'Space Grotesk Variable', var(--font-body);
+  --radius: 10px;
+  --touch-target: 44px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 16px/1.5 var(--font-body);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  line-height: 1.2;
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+}
+.skip-link:focus {
+  left: 16px;
+  top: 16px;
+  background: var(--surface);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+}
+
+.app-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+}
+.app-header .brand {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+.page > h1 {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+.lead {
+  color: var(--ink-secondary);
+  margin: 0 0 24px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.card h2 {
+  font-size: 18px;
+  margin-bottom: 12px;
+}
+
+.stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.stage-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-height: var(--touch-target);
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.stage-list li:first-child {
+  border-top: 0;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.status-badge[data-tone='approved'] {
+  background: var(--status-approved-bg);
+  color: var(--status-approved-fg);
+}
+.status-badge[data-tone='waiting'] {
+  background: var(--status-waiting-bg);
+  color: var(--status-waiting-fg);
+}
+.status-badge[data-tone='review'] {
+  background: var(--status-review-bg);
+  color: var(--status-review-fg);
+}
+.status-badge[data-tone='idle'] {
+  background: var(--status-idle-bg);
+  color: var(--status-idle-fg);
+}
+.status-badge[data-tone='rejected'] {
+  background: var(--status-rejected-bg);
+  color: var(--status-rejected-fg);
+}
