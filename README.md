@@ -1,44 +1,60 @@
-# CCA Prep — Claude Certified Architect exam trainer
+# [Product name]
 
-A small, dependency-free web app for preparing for the **Claude Certified Architect – Foundations** exam.
+Open-source vendor intake and due-diligence service. A requester submits a request for a new vendor or service through a guided form; the request is triaged, goes through configurable review stages and ends in a decision. Approved vendors land in a vendor registry with renewal and re-review reminders.
 
-## Features
+> **Status: early scaffold.** Nothing here is usable by end users yet. See the [roadmap](CLAUDE.md#11-roadmap).
 
-- **Practice by domain** — questions with instant feedback and explanations, per domain or all at once.
-- **Review mistakes** — re-practice only the questions you last got wrong.
-- **Mock exam** — timed, questions drawn proportionally to domain weights, scaled score (100–1000, pass at 720), per-domain breakdown and answer review.
-- **Flashcards** — key terms per domain, flip cards, "I know this" tracking (keyboard: Space = flip, → = know, ← = back).
-- **Progress** — accuracy per domain, exam history, flashcard progress. Stored locally in your browser (`localStorage`).
+## What exists today
 
-## Exam domains
-
-| Domain | Weight |
+| Area | State |
 | --- | --- |
-| Agentic Architecture & Orchestration | 27% |
-| Claude Code Configuration & Workflows | 20% |
-| Prompt Engineering & Structured Output | 20% |
-| Tool Design & MCP Integration | 18% |
-| Context Management & Reliability | 15% |
+| `packages/shared` | Product vocabulary, input schemas, triage risk-tier engine (tested) |
+| `supabase/` | First migration: organizations, memberships, invitations, verified domains, append-only audit log, all with Row Level Security; tenant-isolation tests |
+| `apps/api` | Hono skeleton (health check, security headers) with Node and Cloudflare Workers entrypoints |
+| `apps/web` | React + Vite shell with the design tokens |
+| `deploy/`, `ee/` | Placeholders |
 
-## Run locally
+Not built yet: sign-in, the request form, stages, tracker, notifications, self-host Docker Compose.
 
-No build step — just open `index.html` in a browser, or serve the folder:
+## Repository layout
 
-```bash
-python3 -m http.server 8000
-# then open http://localhost:8000
+```
+apps/web/          React SPA
+apps/api/          TypeScript API (Workers + Node entrypoints)
+packages/shared/   types, validation schemas, rule engine
+supabase/          migrations, RLS policies, tests
+ee/                commercial add-ons (empty for now, own LICENSE)
+deploy/            self-host deployment (placeholder)
+docs/              architecture notes, self-host guide
 ```
 
-## Publish with GitHub Pages
+## Development
 
-Repository **Settings → Pages → Build and deployment → Deploy from a branch**, choose the branch and `/ (root)`.
+Requires Node 22+ and pnpm 10+.
 
-## Adding content
+```bash
+pnpm install
+pnpm typecheck
+pnpm test          # unit tests (shared, api, web)
+pnpm dev:web       # http://localhost:5173
+pnpm dev:api       # http://localhost:8787/health
+```
 
-- Questions: `data/questions.js` — `{ id, domain, question, options[], answer (index), explanation }`
-- Flashcards: `data/flashcards.js` — `{ domain, front, back }`
-- Domains & weights: `data/domains.js`
+### Database tests
 
-## Disclaimer
+The tenant-isolation tests run against any disposable Postgres 15+ database (a small shim stands in for Supabase's `auth` schema and roles). **The database is wiped on every run.**
 
-Unofficial study aid, not affiliated with Anthropic. Questions are original practice items, not real exam questions. Always check the official exam guide for the current domains, weights and format.
+```bash
+export TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/app_test
+pnpm test:db
+```
+
+Every new table needs RLS policies and isolation cases in `supabase/tests/` in the same change; the test suite fails if a table in `public` has RLS disabled or is missing from the test list.
+
+## License
+
+The core is licensed under the [GNU Affero General Public License v3.0](LICENSE). Everything under [`ee/`](ee/) is excluded from the AGPL and is covered by its own commercial license. See also [CLA.md](CLA.md) and [TRADEMARK.md](TRADEMARK.md) (both are drafts pending legal review).
+
+## Security
+
+Please report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
