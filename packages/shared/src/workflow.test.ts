@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { addBusinessDays, DEFAULT_WORKFLOW, planStages, type WorkflowConfig } from './workflow';
+import { REQUEST_FORM_STEPS } from './requestForm';
+import { addBusinessDays, DEFAULT_WORKFLOW, focusStepsForStage, planStages, type WorkflowConfig } from './workflow';
 
 // 2026-11-13 is a Friday.
 const friday = new Date('2026-11-13T15:30:00Z');
@@ -74,9 +75,9 @@ describe('planStages (custom workflow)', () => {
   it('follows organization-specific stages, tiers and deadlines without code changes', () => {
     const config: WorkflowConfig = {
       stages: [
-        { name: 'Procurement', minTier: 'Low', slaBusinessDays: 2 },
-        { name: 'Privacy review', minTier: 'Low', onlyWhen: { field: 'personalData', label: 'Personal data', in: ['Yes'] }, slaBusinessDays: 10 },
-        { name: 'Board approval', minTier: 'Critical', slaBusinessDays: 20 },
+        { name: 'Procurement', minTier: 'Low', slaBusinessDays: 2, checklist: ['Three quotes collected'], focusSteps: [4] },
+        { name: 'Privacy review', minTier: 'Low', onlyWhen: { field: 'personalData', label: 'Personal data', in: ['Yes'] }, slaBusinessDays: 10, checklist: [], focusSteps: [] },
+        { name: 'Board approval', minTier: 'Critical', slaBusinessDays: 20, checklist: [], focusSteps: [] },
       ],
     };
     const stages = planStages('High', { personalData: 'Yes' }, friday, config);
@@ -84,6 +85,22 @@ describe('planStages (custom workflow)', () => {
     expect(stages[0]!.slaDueAt).toBe('2026-11-17T15:30:00.000Z');
     expect(stages[2]!.note).toBe('Not required for High risk');
     expect(planStages('High', {}, friday, config)[1]!.note).toBe('Not required: Personal data is not answered');
+  });
+
+  it('gives required stages their checklist and leaves it empty otherwise', () => {
+    const stages = planStages('Low', { paymentType: 'Free' }, friday);
+    expect(stages.find((s) => s.name === 'License check')!.checklist).toHaveLength(3);
+    expect(stages.find((s) => s.name === 'Security review')!.checklist).toEqual([]);
+    for (const rule of DEFAULT_WORKFLOW.stages) expect(rule.checklist.length).toBeGreaterThan(0);
+  });
+
+  it('points each default stage at existing form steps', () => {
+    for (const rule of DEFAULT_WORKFLOW.stages) {
+      expect(rule.focusSteps.length).toBeGreaterThan(0);
+      for (const index of rule.focusSteps) expect(REQUEST_FORM_STEPS[index]).toBeDefined();
+    }
+    expect(focusStepsForStage('Finance review')).toEqual([4, 5]);
+    expect(focusStepsForStage('Something custom')).toEqual([]);
   });
 
   it('exposes the default configuration as plain data', () => {

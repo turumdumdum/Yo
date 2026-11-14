@@ -4,13 +4,16 @@ interface Props {
   answers: Answers;
   /** When given, each section gets an Edit button that jumps to its step. */
   onEdit?: (stepIndex: number) => void;
+  /** Show only these form steps. */
+  steps?: readonly number[];
 }
 
 /** All answers grouped by form step. */
-export function AnswerSummary({ answers, onEdit }: Props) {
+export function AnswerSummary({ answers, onEdit, steps }: Props) {
   return (
     <>
-      {REQUEST_FORM_STEPS.map((step, index) => (
+      {REQUEST_FORM_STEPS.map((step, index) =>
+        steps && !steps.includes(index) ? null : (
         <section key={step.title} className="summary-section" aria-label={step.title}>
           <div className="summary-head">
             <h3>{step.title}</h3>
@@ -29,7 +32,8 @@ export function AnswerSummary({ answers, onEdit }: Props) {
             ))}
           </dl>
         </section>
-      ))}
+        ),
+      )}
     </>
   );
 }

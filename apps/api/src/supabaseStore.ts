@@ -46,6 +46,7 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
             note: stage.note,
             sla_business_days: stage.slaBusinessDays,
             sla_due_at: stage.slaDueAt,
+            checklist: stage.checklist,
           })),
         }),
       });

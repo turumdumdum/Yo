@@ -1,10 +1,12 @@
-import type { Answers, StageStatus } from '@app/shared';
+import type { Answers, StageDecision, StageStatus } from '@app/shared';
 import type { SupabaseClient } from '@supabase/supabase-js';
+
+export type RequestStatus = 'draft' | 'submitted' | 'in_review' | 'approved' | 'rejected';
 
 export interface RequestRow {
   id: string;
   /** 'submitted' only on requests sent before review stages existed. */
-  status: 'draft' | 'submitted' | 'in_review';
+  status: RequestStatus;
   service_name: string | null;
   request_type: string | null;
   risk_tier: string | null;
@@ -33,8 +35,14 @@ export async function loadRequest(supabase: SupabaseClient, id: string): Promise
   return data;
 }
 
+export interface ChecklistItem {
+  label: string;
+  checked: boolean;
+}
+
 export interface StageRow {
   id: string;
+  request_id: string;
   position: number;
   name: string;
   status: StageStatus;
@@ -42,16 +50,67 @@ export interface StageRow {
   reviewer_id: string | null;
   sla_due_at: string | null;
   sla_paused: boolean;
+  checklist: ChecklistItem[];
+  decision_comment: string | null;
+  conditions: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
 }
 
+const STAGE_COLUMNS =
+  'id,request_id,position,name,status,note,reviewer_id,sla_due_at,sla_paused,checklist,decision_comment,conditions,decided_by,decided_at';
+
 export async function listStages(supabase: SupabaseClient, requestId: string): Promise<StageRow[]> {
-  const { data, error } = await supabase
-    .from('request_stages')
-    .select('id,position,name,status,note,reviewer_id,sla_due_at,sla_paused')
-    .eq('request_id', requestId)
-    .order('position');
+  const { data, error } = await supabase.from('request_stages').select(STAGE_COLUMNS).eq('request_id', requestId).order('position');
   if (error) throw error;
   return data as StageRow[];
+}
+
+export interface QueueItem {
+  id: string;
+  request_id: string;
+  name: string;
+  status: StageStatus;
+  reviewer_id: string | null;
+  sla_due_at: string | null;
+  requests: { service_name: string | null; requester_id: string; risk_tier: string | null };
+}
+
+/** Open stages of requests the caller can see, most urgent first. */
+export async function listOpenStages(supabase: SupabaseClient): Promise<QueueItem[]> {
+  const { data, error } = await supabase
+    .from('request_stages')
+    .select('id,request_id,name,status,reviewer_id,sla_due_at,requests(service_name,requester_id,risk_tier)')
+    .in('status', ['In review', 'Waiting for requester'])
+    .order('sla_due_at');
+  if (error) throw error;
+  return data as unknown as QueueItem[];
+}
+
+export async function assignReviewer(supabase: SupabaseClient, stageId: string, reviewerId: string | null): Promise<void> {
+  const { error } = await supabase.rpc('assign_stage_reviewer', { p_stage_id: stageId, p_reviewer_id: reviewerId });
+  if (error) throw error;
+}
+
+export async function setChecklistItem(supabase: SupabaseClient, stageId: string, index: number, checked: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_stage_checklist_item', { p_stage_id: stageId, p_index: index, p_checked: checked });
+  if (error) throw error;
+}
+
+export async function decideStage(
+  supabase: SupabaseClient,
+  stageId: string,
+  decision: StageDecision,
+  comment: string,
+  conditions: string,
+): Promise<void> {
+  const { error } = await supabase.rpc('decide_stage', {
+    p_stage_id: stageId,
+    p_decision: decision,
+    p_comment: comment,
+    p_conditions: conditions,
+  });
+  if (error) throw error;
 }
 
 export async function createDraft(supabase: SupabaseClient, orgId: string): Promise<string> {

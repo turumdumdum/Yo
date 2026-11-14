@@ -1,40 +1,30 @@
-import { createOrganizationSchema, ORG_ROLE_LABELS, type OrgRole } from '@app/shared';
+import { createOrganizationSchema } from '@app/shared';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { Field } from '../components/Field';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
+import { clearPendingInvitation, pendingInvitation } from '../lib/invite';
 import { Workspace } from '../requests/Workspace';
-
-interface Membership {
-  role: OrgRole;
-  organization: { id: string; name: string };
-  memberCount: number;
-}
-
-async function loadMembership(supabase: SupabaseClient, userId: string): Promise<Membership | null> {
-  const { data, error } = await supabase
-    .from('memberships')
-    .select('role, organizations(id, name)')
-    .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle<{ role: OrgRole; organizations: { id: string; name: string } }>();
-  if (error) throw error;
-  if (!data) return null;
-  const { count, error: countError } = await supabase
-    .from('memberships')
-    .select('user_id', { count: 'exact', head: true })
-    .eq('org_id', data.organizations.id);
-  if (countError) throw countError;
-  return { role: data.role, organization: data.organizations, memberCount: count ?? 0 };
-}
+import { acceptInvitation, loadMembership, type Membership } from './api';
 
 export function OrgGate({ supabase, user }: { supabase: SupabaseClient; user: User }) {
   const [membership, setMembership] = useState<Membership | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
+      const token = pendingInvitation();
+      if (token) {
+        // One attempt per link: a failed invitation is not retried on every page load.
+        clearPendingInvitation();
+        try {
+          await acceptInvitation(supabase, token);
+        } catch (error) {
+          setInviteError(`The invitation could not be accepted: ${errorMessage(error)}.`);
+        }
+      }
       setMembership(await loadMembership(supabase, user.id));
       setLoadError(null);
     } catch (error) {
@@ -48,20 +38,19 @@ export function OrgGate({ supabase, user }: { supabase: SupabaseClient; user: Us
 
   if (loadError) return <FormError message={loadError} />;
   if (membership === undefined) return <p role="status">Loading…</p>;
-  if (membership === null) return <CreateOrganization supabase={supabase} onCreated={reload} />;
+  if (membership === null) {
+    return (
+      <>
+        <FormError message={inviteError} />
+        <CreateOrganization supabase={supabase} onCreated={reload} />
+      </>
+    );
+  }
 
   return (
     <>
-      <p className="org-line">
-        <strong>{membership.organization.name}</strong> · {ORG_ROLE_LABELS[membership.role]} · {membership.memberCount}{' '}
-        {membership.memberCount === 1 ? 'member' : 'members'} · {user.email}
-      </p>
-      <Workspace
-        supabase={supabase}
-        user={user}
-        orgId={membership.organization.id}
-        canCreate={membership.role !== 'auditor'}
-      />
+      <FormError message={inviteError} />
+      <Workspace supabase={supabase} user={user} membership={membership} onOrganizationChanged={reload} />
     </>
   );
 }

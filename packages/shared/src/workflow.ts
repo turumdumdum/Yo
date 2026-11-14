@@ -12,6 +12,10 @@ export interface StageRule {
   /** When set, the stage is also skipped unless the answer has one of these values. */
   onlyWhen?: { field: string; label: string; in: readonly string[] };
   slaBusinessDays: number;
+  /** What the reviewer confirms before approving. */
+  checklist: readonly string[];
+  /** Indexes of the form steps this review is mostly about; shown first to the reviewer. */
+  focusSteps: readonly number[];
 }
 
 export interface WorkflowConfig {
@@ -22,15 +26,58 @@ type DefaultStage = (typeof DEFAULT_STAGES)[number];
 
 // Proposed defaults, not an approved policy: confirm with the owner.
 const DEFAULT_RULES: Record<DefaultStage, Omit<StageRule, 'name'>> = {
-  'License check': { minTier: 'Low', slaBusinessDays: 5 },
-  'Security review': { minTier: 'Medium', slaBusinessDays: 5 },
-  'Legal review': { minTier: 'Medium', slaBusinessDays: 5 },
+  'License check': {
+    minTier: 'Low',
+    slaBusinessDays: 5,
+    focusSteps: [0, 2, 4],
+    checklist: [
+      'The license terms allow our intended use',
+      'Seats or usage limits cover the expected number of users',
+      'We do not already have a tool or license that covers this need',
+    ],
+  },
+  'Security review': {
+    minTier: 'Medium',
+    slaBusinessDays: 5,
+    focusSteps: [2, 3],
+    checklist: [
+      "The vendor's security documentation was reviewed (for example SOC 2 Type II, ISO/IEC 27001 or a questionnaire)",
+      'The sign-in method meets our access policy',
+      'The data classification and data location are acceptable',
+      "The vendor's use of AI on our data is understood and acceptable",
+    ],
+  },
+  'Legal review': {
+    minTier: 'Medium',
+    slaBusinessDays: 5,
+    focusSteps: [1, 3, 4],
+    checklist: [
+      'The contract or terms of service were reviewed',
+      'A data processing agreement is in place if personal data is involved',
+      'The vendor legal entity and its country of registration were verified',
+    ],
+  },
   'Finance review': {
     minTier: 'Low',
     onlyWhen: { field: 'paymentType', label: 'Paid or free', in: ['Paid'] },
     slaBusinessDays: 5,
+    focusSteps: [4, 5],
+    checklist: [
+      'Budget is available and the budget owner confirmed it',
+      'Price, contract term and renewal terms were reviewed',
+      'The cost center is correct',
+    ],
   },
-  'IT review': { minTier: 'Low', slaBusinessDays: 5 },
+  'IT review': {
+    minTier: 'Low',
+    slaBusinessDays: 5,
+    focusSteps: [2, 5],
+    checklist: [
+      'The platform and integrations are supported in our environment',
+      'An access administrator and a technical owner are named',
+      'Access can be removed when people leave',
+    ],
+  },
 };
 
 export const DEFAULT_WORKFLOW: WorkflowConfig = {
@@ -45,6 +92,16 @@ export interface PlannedStage {
   slaDueAt: string | null;
   /** Why the stage is not required, shown to everyone who can see the request. */
   note: string | null;
+  /** Checklist labels for the reviewer; empty for stages that are not required. */
+  checklist: string[];
+}
+
+export const STAGE_DECISIONS = ['Approved', 'Approved with conditions', 'Rejected'] as const;
+export type StageDecision = (typeof STAGE_DECISIONS)[number];
+
+/** Form steps a reviewer of the named stage should look at first; empty for unknown stages. */
+export function focusStepsForStage(stageName: string, config: WorkflowConfig = DEFAULT_WORKFLOW): readonly number[] {
+  return config.stages.find((rule) => rule.name === stageName)?.focusSteps ?? [];
 }
 
 /**
@@ -79,13 +136,14 @@ export function planStages(
         note = `Not required: ${rule.onlyWhen.label} is ${typeof value === 'string' ? value : 'not answered'}`;
       }
     }
-    if (note) return { name: rule.name, status: 'Not required', slaBusinessDays: null, slaDueAt: null, note };
+    if (note) return { name: rule.name, status: 'Not required', slaBusinessDays: null, slaDueAt: null, note, checklist: [] };
     return {
       name: rule.name,
       status: 'In review',
       slaBusinessDays: rule.slaBusinessDays,
       slaDueAt: addBusinessDays(submittedAt, rule.slaBusinessDays).toISOString(),
       note: null,
+      checklist: [...rule.checklist],
     };
   });
 }

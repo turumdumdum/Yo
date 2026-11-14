@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { Field } from '../components/Field';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
+import { pendingInvitation } from '../lib/invite';
 
 type Mode = 'sign-in' | 'sign-up';
 
@@ -78,6 +79,12 @@ export function CredentialsForm({ supabase }: { supabase: SupabaseClient }) {
   return (
     <section className="card auth-card" aria-labelledby="auth-heading">
       <h1 id="auth-heading">{signingUp ? 'Create your account' : 'Sign in'}</h1>
+      {pendingInvitation() && (
+        <p className="notice">
+          You have been invited to an organization. Sign in or create an account with the email address the invitation was
+          sent to.
+        </p>
+      )}
       <form onSubmit={submit} noValidate>
         <Field
           label="Work email"

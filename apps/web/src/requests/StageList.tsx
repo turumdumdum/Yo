@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import type { Answers } from '@app/shared';
+import { useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { FormError } from '../components/FormError';
 import { StatusBadge } from '../components/StatusBadge';
-import { errorMessage } from '../lib/errors';
-import { listStages, type StageRow } from './api';
+import type { StageRow } from './api';
+import { StagePanel, type ReviewContext } from './StagePanel';
 
 const DONE = new Set(['Approved', 'Approved with conditions', 'Rejected']);
+const OPEN = new Set(['In review', 'Waiting for requester']);
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { dateStyle: 'medium' });
 
@@ -16,24 +17,21 @@ function slaText(stage: StageRow, now: number): string | null {
   return due.getTime() < now ? `Overdue since ${formatDate(stage.sla_due_at)}` : `Due ${formatDate(stage.sla_due_at)}`;
 }
 
-/** Review stages of a submitted request, with progress, reviewer and SLA. */
-export function StageList({ supabase, requestId }: { supabase: SupabaseClient; requestId: string }) {
-  const [stages, setStages] = useState<StageRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+interface Props {
+  supabase: SupabaseClient;
+  stages: StageRow[];
+  answers: Answers;
+  requesterId: string;
+  context: ReviewContext;
+  /** Stage to show expanded at first, for example when arriving from the review queue. */
+  initialStageId?: string;
+  onChanged: () => Promise<void> | void;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    listStages(supabase, requestId).then(
-      (rows) => !cancelled && setStages(rows),
-      (e) => !cancelled && setError(errorMessage(e)),
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase, requestId]);
+/** Review stages of a submitted request, with progress, reviewer, SLA and the review itself. */
+export function StageList({ supabase, stages, answers, requesterId, context, initialStageId, onChanged }: Props) {
+  const [expanded, setExpanded] = useState<string | null>(initialStageId ?? null);
 
-  if (error) return <FormError message={error} />;
-  if (!stages) return <p role="status">Loading…</p>;
   if (stages.length === 0) {
     return <p className="empty">This request was submitted before review stages existed, so it has none.</p>;
   }
@@ -41,6 +39,7 @@ export function StageList({ supabase, requestId }: { supabase: SupabaseClient; r
   const required = stages.filter((s) => s.status !== 'Not required');
   const done = required.filter((s) => DONE.has(s.status)).length;
   const now = Date.now();
+  const nameOf = (userId: string) => context.members.find((m) => m.user_id === userId)?.email ?? 'a former member';
 
   return (
     <>
@@ -50,18 +49,46 @@ export function StageList({ supabase, requestId }: { supabase: SupabaseClient; r
       <progress className="progress-line" max={required.length} value={done} aria-label="Review progress" />
       <ul className="stage-list">
         {stages.map((stage) => {
-          const sla = slaText(stage, now);
+          const notRequired = stage.status === 'Not required';
+          const isOpen = expanded === stage.id;
+          const mine = OPEN.has(stage.status) && (context.isManager || stage.reviewer_id === context.userId);
+          const meta = notRequired
+            ? stage.note
+            : [stage.reviewer_id ? `Reviewer: ${nameOf(stage.reviewer_id)}` : DONE.has(stage.status) ? null : 'No reviewer yet', slaText(stage, now)]
+                .filter(Boolean)
+                .join(' · ');
           return (
-            <li key={stage.id}>
-              <span className="stage-main">
-                <span className="stage-name">{stage.name}</span>
-                <span className="stage-meta">
-                  {stage.status === 'Not required'
-                    ? stage.note
-                    : [stage.reviewer_id ? 'Reviewer assigned' : 'No reviewer yet', sla].filter(Boolean).join(' · ')}
+            <li key={stage.id} className="stage-item">
+              <div className="stage-row">
+                <span className="stage-main">
+                  <span className="stage-name">{stage.name}</span>
+                  <span className="stage-meta">{meta}</span>
                 </span>
-              </span>
-              <StatusBadge status={stage.status} />
+                <StatusBadge status={stage.status} />
+                {!notRequired && (
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    aria-expanded={isOpen}
+                    aria-label={`${isOpen ? 'Close' : mine ? 'Review' : 'Details of'} ${stage.name}`}
+                    onClick={() => setExpanded(isOpen ? null : stage.id)}
+                  >
+                    {isOpen ? 'Close' : mine ? 'Review' : 'Details'}
+                  </button>
+                )}
+              </div>
+              {isOpen && (
+                <StagePanel
+                  // A fresh panel after each decision, so typed text does not linger.
+                  key={`${stage.id}-${stage.status}`}
+                  supabase={supabase}
+                  stage={stage}
+                  answers={answers}
+                  requesterId={requesterId}
+                  context={context}
+                  onChanged={onChanged}
+                />
+              )}
             </li>
           );
         })}

@@ -15,7 +15,15 @@ export function RiskBadge({ tier }: { tier: string }) {
   return <Badge tone={RISK_TONES[tier] ?? 'idle'}>{`${tier} risk`}</Badge>;
 }
 
-export function RequestStatusBadge({ status }: { status: 'draft' | 'submitted' | 'in_review' }) {
-  if (status === 'draft') return <Badge tone="idle">Draft</Badge>;
-  return <Badge tone="review">{status === 'in_review' ? 'In review' : 'Submitted'}</Badge>;
+const REQUEST_STATUS: Record<string, { tone: Tone; label: string }> = {
+  draft: { tone: 'idle', label: 'Draft' },
+  submitted: { tone: 'review', label: 'Submitted' },
+  in_review: { tone: 'review', label: 'In review' },
+  approved: { tone: 'approved', label: 'Approved' },
+  rejected: { tone: 'rejected', label: 'Rejected' },
+};
+
+export function RequestStatusBadge({ status }: { status: string }) {
+  const { tone, label } = REQUEST_STATUS[status] ?? { tone: 'idle' as const, label: status };
+  return <Badge tone={tone}>{label}</Badge>;
 }

@@ -36,7 +36,7 @@ describe('supabaseRequestStore', () => {
   it('submits through the service-role RPC', async () => {
     const { impl, calls } = fakeFetch(200, { id: ID, status: 'in_review', risk_tier: 'Low', risk_score: 0, risk_reasons: [], submitted_at: 'now' });
     await supabaseRequestStore(config, impl).submit(ID, { serviceName: 'A' }, { tier: 'Low', score: 0, reasons: [] }, [
-      { name: 'License check', status: 'In review', slaBusinessDays: 5, slaDueAt: '2026-11-20T15:30:00.000Z', note: null },
+      { name: 'License check', status: 'In review', slaBusinessDays: 5, slaDueAt: '2026-11-20T15:30:00.000Z', note: null, checklist: ['Terms ok'] },
     ]);
     expect(calls[0]!.url).toBe('https://project.supabase.co/rest/v1/rpc/submit_request');
     expect((calls[0]!.init!.headers as Record<string, string>).apikey).toBe('secret-key');
@@ -47,7 +47,7 @@ describe('supabaseRequestStore', () => {
       p_risk_score: 0,
       p_risk_reasons: [],
       p_stages: [
-        { name: 'License check', status: 'In review', note: null, sla_business_days: 5, sla_due_at: '2026-11-20T15:30:00.000Z' },
+        { name: 'License check', status: 'In review', note: null, sla_business_days: 5, sla_due_at: '2026-11-20T15:30:00.000Z', checklist: ['Terms ok'] },
       ],
     });
   });
