@@ -140,15 +140,22 @@ export class SubmitError extends Error {
   }
 }
 
-async function callApi(supabase: SupabaseClient, path: string, method: 'GET' | 'POST'): Promise<Response> {
+async function callApi(supabase: SupabaseClient, path: string, method: 'GET' | 'POST', timeoutMs = 30_000): Promise<Response> {
   const apiUrl = import.meta.env.VITE_API_URL;
   if (!apiUrl) throw new SubmitError('The API address is not configured. Set VITE_API_URL in apps/web/.env.');
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new SubmitError('Your session has expired. Sign in again.');
   try {
-    return await fetch(`${apiUrl.replace(/\/+$/, '')}${path}`, { method, headers: { authorization: `Bearer ${token}` } });
-  } catch {
+    return await fetch(`${apiUrl.replace(/\/+$/, '')}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new SubmitError('The API did not answer in time. Check that it is still running and try again.');
+    }
     throw new SubmitError('Could not reach the API. Check that it is running and try again.');
   }
 }
@@ -166,6 +173,9 @@ export async function submitRequest(supabase: SupabaseClient, id: string): Promi
 
 const AI_OFF: AiStatus = { enabled: false, provider: null };
 
+/** The API gives up on the provider after about two minutes; the browser waits a little longer. */
+const AI_TIMEOUT_MS = 150_000;
+
 /** Whether the optional AI plugin is configured. Any failure simply means "no AI". */
 export async function aiStatus(supabase: SupabaseClient): Promise<AiStatus> {
   try {
@@ -177,13 +187,13 @@ export async function aiStatus(supabase: SupabaseClient): Promise<AiStatus> {
 }
 
 export async function aiSuggestions(supabase: SupabaseClient, id: string): Promise<AiSuggestion[]> {
-  const res = await callApi(supabase, `/v1/requests/${id}/ai/suggestions`, 'POST');
+  const res = await callApi(supabase, `/v1/requests/${id}/ai/suggestions`, 'POST', AI_TIMEOUT_MS);
   if (!res.ok) throw await apiError(res, 'The AI could not suggest anything.');
   return ((await res.json()) as { suggestions: AiSuggestion[] }).suggestions;
 }
 
 export async function aiCheck(supabase: SupabaseClient, id: string): Promise<AiRemark[]> {
-  const res = await callApi(supabase, `/v1/requests/${id}/ai/check`, 'POST');
+  const res = await callApi(supabase, `/v1/requests/${id}/ai/check`, 'POST', AI_TIMEOUT_MS);
   if (!res.ok) throw await apiError(res, 'The AI could not check the answers.');
   return ((await res.json()) as { remarks: AiRemark[] }).remarks;
 }

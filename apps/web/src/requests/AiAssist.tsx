@@ -1,5 +1,5 @@
 import { fieldLabel, formatAnswer, REQUEST_FORM_STEPS, type AiRemark, type AiSuggestion, type Answers } from '@app/shared';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
@@ -28,6 +28,15 @@ export function AiAssist({ supabase, requestId, provider, mode, answers, save, o
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<AiSuggestion[] | null>(null);
   const [remarks, setRemarks] = useState<AiRemark[] | null>(null);
+  const [seconds, setSeconds] = useState(0);
+
+  // Show that something is happening while the provider works.
+  useEffect(() => {
+    if (!busy) return;
+    setSeconds(0);
+    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
 
   async function ask() {
     setBusy(true);
@@ -51,14 +60,14 @@ export function AiAssist({ supabase, requestId, provider, mode, answers, save, o
       <div className="ai-head">
         <h2 id={`ai-${mode}-heading`}>{suggest ? 'Look up the vendor with AI' : 'Check the answers with AI'}</h2>
         <button type="button" className="button button-secondary button-small" disabled={busy} onClick={() => void ask()}>
-          {busy ? 'Working…' : suggest ? 'Suggest vendor details' : 'Check with AI'}
+          {busy ? `Working… ${seconds}s` : suggest ? 'Suggest vendor details' : 'Check with AI'}
         </button>
       </div>
       <p className="field-hint">
         {suggest
           ? `Optional. Sends the service name, vendor and website to ${provider} and proposes values you can accept or ignore.`
           : `Optional. Sends your answers, without the names of owners, to ${provider}. Remarks are advice only.`}
-        {busy && ' This can take up to two minutes.'}
+        {busy && ' This can take up to two minutes; you can keep filling in the form meanwhile.'}
       </p>
       <FormError message={error} />
 

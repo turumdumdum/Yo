@@ -253,7 +253,38 @@ describe('parallelProvider', () => {
 
   it('gives up after the deadline', async () => {
     const { impl } = fakeFetch([{ status: 202, body: { run_id: 'r', status: 'queued' } }]);
-    await expect(parallelProvider({ apiKey: 'k', timeoutMs: 0 }, impl).run(task)).rejects.toThrow(/took too long/);
+    await expect(parallelProvider({ apiKey: 'k', timeoutMs: 500 }, impl).run(task)).rejects.toThrow(/took too long/);
+  });
+
+  it('does not hang when the provider never answers', async () => {
+    // Resolves only when the request is aborted, like a stalled connection.
+    const stalled = ((_url: string | URL | Request, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      })) as typeof fetch;
+    const started = Date.now();
+    const failure = parallelProvider({ apiKey: 'k', timeoutMs: 300 }, stalled).run(task);
+    await expect(failure).rejects.toThrow(/took too long/);
+    await expect(failure).rejects.toBeInstanceOf(AiProviderError);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('never asks the server to wait past the deadline', async () => {
+    const { impl, calls } = fakeFetch([
+      { status: 202, body: { run_id: 'r', status: 'queued' } },
+      { status: 200, body: completed },
+    ]);
+    await parallelProvider({ apiKey: 'k', timeoutMs: 8_000 }, impl).run(task);
+    const wait = Number(new URL(calls[1]!.url).searchParams.get('timeout'));
+    expect(wait).toBeGreaterThanOrEqual(1);
+    expect(wait).toBeLessThanOrEqual(7);
+  });
+
+  it('reports an unreachable provider', async () => {
+    const offline = (async () => {
+      throw new TypeError('fetch failed');
+    }) as typeof fetch;
+    await expect(parallelProvider({ apiKey: 'k' }, offline).run(task)).rejects.toThrow(/Could not reach/);
   });
 });
 

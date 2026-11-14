@@ -48,9 +48,16 @@ export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) 
 
   async function run<T>(c: Context, task: AiTask, parse: (result: Awaited<ReturnType<AiProvider['run']>>) => T) {
     try {
-      return c.json(parse(await provider!.run(task)));
+      const started = Date.now();
+      const result = parse(await provider!.run(task));
+      console.info(`AI ${c.req.path.split('/').pop()} via ${provider!.name}: done in ${Math.round((Date.now() - started) / 1000)}s`);
+      return c.json(result);
     } catch (error) {
-      if (error instanceof AiProviderError) return c.json({ error: error.message }, 502);
+      if (error instanceof AiProviderError) {
+        // Shown in the API terminal so a failure can be diagnosed. Never contains the key or answers.
+        console.warn(`AI ${c.req.path.split('/').pop()} via ${provider!.name} failed: ${error.message}`);
+        return c.json({ error: error.message }, 502);
+      }
       throw error;
     }
   }
