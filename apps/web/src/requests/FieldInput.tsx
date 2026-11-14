@@ -1,4 +1,4 @@
-import type { FieldDef, OwnerValue } from '@app/shared';
+import { formatAnswer, withHttps, type AiSuggestion, type FieldDef, type OwnerValue } from '@app/shared';
 import { useId } from 'react';
 
 interface Props {
@@ -6,10 +6,51 @@ interface Props {
   value: unknown;
   error?: string;
   onChange: (value: unknown) => void;
+  /** An AI proposal for this field, shown under it until the requester uses or dismisses it. */
+  suggestion?: AiSuggestion;
+  onDismissSuggestion?: () => void;
+}
+
+/** A proposed value under a field. Using it fills the field, which stays editable. */
+function Suggestion({ field, suggestion, onUse, onDismiss }: { field: FieldDef; suggestion: AiSuggestion; onUse: () => void; onDismiss: () => void }) {
+  return (
+    <div className="suggestion" role="group" aria-label={`Suggested ${field.label}`}>
+      <p>
+        <span className="suggested-tag">Suggested</span> {formatAnswer(field, suggestion.value)}
+      </p>
+      {suggestion.reason && <p className="stage-meta">{suggestion.reason}</p>}
+      {suggestion.sources.length > 0 && (
+        <p className="stage-meta">
+          Sources:{' '}
+          {suggestion.sources.map((source, i) => (
+            <span key={source.url}>
+              {i > 0 && ', '}
+              <a href={source.url} target="_blank" rel="noreferrer noopener">
+                {source.title || new URL(source.url).hostname}
+              </a>
+            </span>
+          ))}
+        </p>
+      )}
+      <div className="suggestion-actions">
+        <button type="button" className="button button-small" aria-label={`Use suggested ${field.label}`} onClick={onUse}>
+          Use
+        </button>
+        <button
+          type="button"
+          className="button button-secondary button-small"
+          aria-label={`Dismiss suggested ${field.label}`}
+          onClick={onDismiss}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /** Renders one form field from its definition. */
-export function FieldInput({ field, value, error, onChange }: Props) {
+export function FieldInput({ field, value, error, onChange, suggestion, onDismissSuggestion }: Props) {
   const id = useId();
   const hintId = field.hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
@@ -31,6 +72,17 @@ export function FieldInput({ field, value, error, onChange }: Props) {
     </p>
   );
   const common = { id, 'aria-describedby': describedBy, 'aria-invalid': error ? true : undefined } as const;
+  const suggested = suggestion && (
+    <Suggestion
+      field={field}
+      suggestion={suggestion}
+      onUse={() => {
+        onChange(suggestion.value);
+        onDismissSuggestion?.();
+      }}
+      onDismiss={() => onDismissSuggestion?.()}
+    />
+  );
 
   if (field.type === 'radio' || field.type === 'multiselect') {
     const selected = field.type === 'multiselect' ? (Array.isArray(value) ? (value as string[]) : []) : [];
@@ -64,6 +116,7 @@ export function FieldInput({ field, value, error, onChange }: Props) {
             ),
           )}
         </div>
+        {suggested}
         {errorText}
       </fieldset>
     );
@@ -92,6 +145,7 @@ export function FieldInput({ field, value, error, onChange }: Props) {
           />
           Not required
         </label>
+        {suggested}
         {errorText}
       </fieldset>
     );
@@ -131,9 +185,13 @@ export function FieldInput({ field, value, error, onChange }: Props) {
     control = (
       <input
         {...common}
-        type={field.type === 'date' ? 'date' : field.type === 'url' ? 'url' : 'text'}
+        // Not type="url": the browser would reject an address typed without https://.
+        type={field.type === 'date' ? 'date' : 'text'}
+        inputMode={field.type === 'url' ? 'url' : undefined}
+        autoCapitalize={field.type === 'url' ? 'none' : undefined}
         value={text}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={field.type === 'url' ? (e) => e.target.value.trim() !== '' && onChange(withHttps(e.target.value)) : undefined}
       />
     );
   }
@@ -143,6 +201,7 @@ export function FieldInput({ field, value, error, onChange }: Props) {
       <label htmlFor={id}>{label}</label>
       {hint}
       {control}
+      {suggested}
       {errorText}
     </div>
   );

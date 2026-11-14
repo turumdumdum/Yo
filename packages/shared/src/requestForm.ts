@@ -101,7 +101,7 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
     fields: [
       { key: 'serviceName', label: 'Service name', type: 'text' },
       { key: 'vendorName', label: 'Vendor', type: 'text' },
-      { key: 'vendorWebsite', label: 'Vendor website', type: 'url', hint: 'For example https://vendor.example' },
+      { key: 'vendorWebsite', label: 'Vendor website', type: 'url', hint: 'For example vendor.example. https:// is added for you.' },
       { key: 'requestType', label: 'Request type', type: 'radio', options: options(REQUEST_TYPES) },
       { key: 'category', label: 'Category', type: 'select', options: options(CATEGORIES) },
       { key: 'purpose', label: 'Purpose of use', type: 'textarea', hint: 'What will the service be used for, and by whom?' },
@@ -224,6 +224,13 @@ export function visibleFields(stepIndex: number, answers: Answers): FieldDef[] {
   return (REQUEST_FORM_STEPS[stepIndex]?.fields ?? []).filter((f) => isVisible(f, answers));
 }
 
+/** Adds https:// to a web address that has no scheme: "acme.example" becomes "https://acme.example". */
+export function withHttps(raw: string): string {
+  const value = raw.trim();
+  if (value === '' || /^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
+  return `https://${value.replace(/^\/+/, '')}`;
+}
+
 type Checked = { value: unknown } | { error: string } | { empty: true };
 
 function checkField(field: FieldDef, raw: unknown): Checked {
@@ -233,13 +240,14 @@ function checkField(field: FieldDef, raw: unknown): Checked {
     case 'url':
     case 'date': {
       if (typeof raw !== 'string' || raw.trim() === '') return { empty: true };
-      const value = raw.trim();
+      // A web address typed without a scheme gets https://.
+      const value = field.type === 'url' ? withHttps(raw) : raw.trim();
       const max = field.type === 'textarea' ? TEXTAREA_MAX : TEXT_MAX;
       if (value.length > max) return { error: `Use at most ${max} characters` };
       if (field.type === 'url') {
         // No URL global here: this package is built without DOM or Node typings.
         if (!/^https?:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+([/:?#]\S*)?$/i.test(value)) {
-          return { error: 'Enter a web address that starts with https://' };
+          return { error: 'Enter a web address such as vendor.example' };
         }
       }
       if (field.type === 'date') {

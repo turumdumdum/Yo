@@ -4,6 +4,7 @@ import {
   REQUEST_FORM_STEPS,
   validateAnswers,
   visibleFields,
+  type AiSuggestion,
   type Answers,
 } from '@app/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -45,6 +46,9 @@ export function RequestForm({ supabase, requestId, initialAnswers, onSubmitted, 
   const headingRef = useRef<HTMLHeadingElement>(null);
   // Name of the AI provider when the optional plugin is configured; null means no AI buttons.
   const [aiProvider, setAiProvider] = useState<string | null>(null);
+  // AI proposals by field, shown under each field until used or dismissed.
+  const [suggestions, setSuggestions] = useState<Record<string, AiSuggestion>>({});
+  const dismissSuggestion = (key: string) => setSuggestions(({ [key]: _gone, ...rest }) => rest);
 
   useEffect(() => {
     let cancelled = false;
@@ -212,6 +216,7 @@ export function RequestForm({ supabase, requestId, initialAnswers, onSubmitted, 
               answers={answers}
               save={save}
               onApply={change}
+              onSuggestions={(found) => setSuggestions(Object.fromEntries(found.map((sg) => [sg.field, sg])))}
             />
           )}
 
@@ -222,6 +227,8 @@ export function RequestForm({ supabase, requestId, initialAnswers, onSubmitted, 
               value={answers[field.key]}
               error={errors[field.key]}
               onChange={(value) => change(field.key, value)}
+              suggestion={suggestions[field.key]}
+              onDismissSuggestion={() => dismissSuggestion(field.key)}
             />
           ))}
 

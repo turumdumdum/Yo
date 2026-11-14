@@ -8,6 +8,7 @@ import {
   riskInputFromAnswers,
   validateAnswers,
   visibleFields,
+  withHttps,
   type Answers,
 } from './requestForm';
 
@@ -125,7 +126,8 @@ describe('validateAnswers', () => {
   });
 
   it.each([
-    ['vendorWebsite', 'acme.example'],
+    ['vendorWebsite', 'acme'],
+    ['vendorWebsite', 'ftp://acme.example'],
     ['vendorWebsite', 'javascript:alert(1)'],
     ['vendorWebsite', 'https://localhost'],
     ['neededBy', '2027-02-30'],
@@ -141,6 +143,21 @@ describe('validateAnswers', () => {
     ['serviceName', 'x'.repeat(201)],
   ])('rejects %s = %j', (key, value) => {
     expect(validateAnswers({ ...complete, [key]: value }).errors[key]).toBeDefined();
+  });
+
+  it.each([
+    ['acme.example', 'https://acme.example'],
+    ['  www.acme.example/pricing ', 'https://www.acme.example/pricing'],
+    ['//acme.example', 'https://acme.example'],
+    ['http://acme.example', 'http://acme.example'],
+    ['HTTPS://acme.example', 'HTTPS://acme.example'],
+  ])('adds https:// to a website typed as %s', (typed, stored) => {
+    expect(withHttps(typed)).toBe(stored);
+    expect(validateAnswers({ ...complete, vendorWebsite: typed }).cleaned.vendorWebsite).toBe(stored);
+  });
+
+  it('leaves an empty website empty', () => {
+    expect(withHttps('  ')).toBe('');
   });
 
   it('normalizes values and drops unknown keys', () => {
