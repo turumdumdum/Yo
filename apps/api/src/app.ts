@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { adminRoutes, type AdminStore } from './admin';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AiProvider } from './ai/provider';
 import { aiRoutes } from './ai/routes';
@@ -14,6 +15,7 @@ export interface AppOptions {
   requests?: RequestStore;
   /** Optional AI plugin. Off unless configured; the core works without it. */
   ai?: AiProvider;
+  admin?: AdminStore;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -31,7 +33,11 @@ export function createApp(options: AppOptions = {}) {
   if (options.webOrigin) {
     app.use(
       '/v1/*',
-      cors({ origin: options.webOrigin, allowMethods: ['GET', 'POST'], allowHeaders: ['authorization', 'content-type'] }),
+      cors({
+        origin: options.webOrigin,
+        allowMethods: ['GET', 'POST', 'PUT', 'DELETE'],
+        allowHeaders: ['authorization', 'content-type'],
+      }),
     );
   }
 
@@ -41,6 +47,7 @@ export function createApp(options: AppOptions = {}) {
     app.route('/v1/requests', requestRoutes(options.requests));
     app.route('/v1', aiRoutes(options.requests, options.ai));
   }
+  if (options.admin) app.route('/v1', adminRoutes(options.admin));
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

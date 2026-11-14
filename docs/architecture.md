@@ -41,6 +41,21 @@ The decisions behind this layout are in [CLAUDE.md](../CLAUDE.md) §3 and §8. T
 - Email is not sent yet: the admin copies the link. The web app moves the token from the URL into local storage and exchanges it after sign-in and two-step verification.
 - `memberships.email` is copied from the account at insert time so that colleagues can be shown by email.
 
+## Bulk invitations and allowed domains
+
+- `create_invitations` takes up to 500 `{email, role}` rows; each row succeeds or fails on its own (invalid email, unknown role, listed twice, already a member, domain not allowed) and the result lists a token or an error per row. The web app parses CSV (comma or semicolon, with or without a header) and JSON with `parseInviteImport` in `packages/shared/src/inviteImport.ts`, shows skipped rows with their line, and offers the links as a CSV download. Emails are still not sent.
+- `verified_domains` holds the organization's email domains. With `restrict_to_verified_domains` on, invitations to other domains are refused and accepting an older invitation to another domain fails. The restriction cannot be turned on without a domain, and the last domain cannot be removed while it is on. Subdomains are separate domains. Domain changes and the switch are audited.
+- Restricting needs no proof of ownership because it only narrows who can join. Joining automatically by domain is not built; it will require `verified_at`, set by the backend after a DNS check.
+
+## Review forms
+
+- A review form is a list of questions (one or several choices, date, short or long text) with optional sections, help text, "required to approve", values flagged as a concern, and for dates a maximum age. Rules flag a concern when a request answer (for example data classification) calls for at least one of some values (for example SOC 2 Type II or ISO/IEC 27001). Defined in `packages/shared/src/reviewForms.ts`; the default security review form lives there too.
+- Organizations override a stage's form in `review_templates`. Writes go through `PUT/DELETE /v1/review-forms/:stage`, which checks that the caller is an org admin or process manager and validates the form with the shared schema; the change is audited. A stored form that fails validation is ignored at submission and the default applies.
+- At submission the form is copied into `request_stages.review_fields` and `review_rules`, so editing a form never changes reviews already started.
+- Reviewers save answers with `save_stage_review_answers` (unknown fields dropped, types checked). `decide_stage` refuses Approved and Approved with conditions until the required answers are complete; Rejected is always possible. `private.review_answers_error` is the authoritative check; `validateReviewAnswers` mirrors it for the UI.
+- `review_answers` is not readable through the table: the requester cannot see the security assessment. `request_review_answers` returns the answers to org admins, process managers, auditors and the request's reviewers.
+- Concerns (flagged values, old reports, unmet rules) are shown to the reviewer and never block a decision.
+
 ## AI plugin (optional)
 
 CLAUDE.md §2 applies: the core works without AI, the plugin is off by default and uses the operator's own key. The roadmap lists it under stage 5; the owner asked for it earlier.

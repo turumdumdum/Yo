@@ -1,4 +1,14 @@
-import type { AiRemark, AiStatus, AiSuggestion, Answers, StageDecision, StageStatus } from '@app/shared';
+import type {
+  AiRemark,
+  AiStatus,
+  AiSuggestion,
+  Answers,
+  ReviewFieldDef,
+  ReviewRule,
+  ReviewTemplate,
+  StageDecision,
+  StageStatus,
+} from '@app/shared';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type RequestStatus = 'draft' | 'submitted' | 'in_review' | 'approved' | 'rejected';
@@ -55,10 +65,36 @@ export interface StageRow {
   conditions: string | null;
   decided_by: string | null;
   decided_at: string | null;
+  review_fields: ReviewFieldDef[];
+  review_rules: ReviewRule[];
 }
 
 const STAGE_COLUMNS =
-  'id,request_id,position,name,status,note,reviewer_id,sla_due_at,sla_paused,checklist,decision_comment,conditions,decided_by,decided_at';
+  'id,request_id,position,name,status,note,reviewer_id,sla_due_at,sla_paused,checklist,decision_comment,conditions,decided_by,decided_at,review_fields,review_rules';
+
+/** Review answers by stage id. Empty for people who may not see them, such as the requester. */
+export async function requestReviewAnswers(supabase: SupabaseClient, requestId: string): Promise<Record<string, Answers>> {
+  const { data, error } = await supabase.rpc('request_review_answers', { p_request_id: requestId });
+  if (error) throw error;
+  return (data ?? {}) as Record<string, Answers>;
+}
+
+export async function saveReviewAnswers(supabase: SupabaseClient, stageId: string, answers: Answers): Promise<void> {
+  const { error } = await supabase.rpc('save_stage_review_answers', { p_stage_id: stageId, p_answers: answers });
+  if (error) throw error;
+}
+
+/** The organization's own form for a stage, or null when it uses the default. */
+export async function loadReviewTemplate(supabase: SupabaseClient, orgId: string, stage: string): Promise<ReviewTemplate | null> {
+  const { data, error } = await supabase
+    .from('review_templates')
+    .select('fields,rules')
+    .eq('org_id', orgId)
+    .eq('stage_name', stage)
+    .maybeSingle<ReviewTemplate>();
+  if (error) throw error;
+  return data;
+}
 
 export async function listStages(supabase: SupabaseClient, requestId: string): Promise<StageRow[]> {
   const { data, error } = await supabase.from('request_stages').select(STAGE_COLUMNS).eq('request_id', requestId).order('position');
@@ -140,7 +176,13 @@ export class SubmitError extends Error {
   }
 }
 
-async function callApi(supabase: SupabaseClient, path: string, method: 'GET' | 'POST', timeoutMs = 30_000): Promise<Response> {
+async function callApi(
+  supabase: SupabaseClient,
+  path: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  timeoutMs = 30_000,
+  body?: unknown,
+): Promise<Response> {
   const apiUrl = import.meta.env.VITE_API_URL;
   if (!apiUrl) throw new SubmitError('The API address is not configured. Set VITE_API_URL in apps/web/.env.');
   const { data } = await supabase.auth.getSession();
@@ -149,7 +191,8 @@ async function callApi(supabase: SupabaseClient, path: string, method: 'GET' | '
   try {
     return await fetch(`${apiUrl.replace(/\/+$/, '')}${path}`, {
       method,
-      headers: { authorization: `Bearer ${token}` },
+      headers: body === undefined ? { authorization: `Bearer ${token}` } : { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
@@ -196,4 +239,16 @@ export async function aiCheck(supabase: SupabaseClient, id: string): Promise<AiR
   const res = await callApi(supabase, `/v1/requests/${id}/ai/check`, 'POST', AI_TIMEOUT_MS);
   if (!res.ok) throw await apiError(res, 'The AI could not check the answers.');
   return ((await res.json()) as { remarks: AiRemark[] }).remarks;
+}
+
+/** Saves a stage's review form through the API, which validates it with the shared schema. */
+export async function saveReviewTemplate(supabase: SupabaseClient, stage: string, template: ReviewTemplate): Promise<void> {
+  const res = await callApi(supabase, `/v1/review-forms/${encodeURIComponent(stage)}`, 'PUT', 30_000, template);
+  if (!res.ok) throw await apiError(res, 'The form could not be saved.');
+}
+
+/** Removes the organization's form so the default applies again. */
+export async function resetReviewTemplate(supabase: SupabaseClient, stage: string): Promise<void> {
+  const res = await callApi(supabase, `/v1/review-forms/${encodeURIComponent(stage)}`, 'DELETE');
+  if (!res.ok) throw await apiError(res, 'The form could not be reset.');
 }

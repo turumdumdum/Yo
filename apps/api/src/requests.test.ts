@@ -4,6 +4,7 @@ import { createApp } from './app';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore } from './requests';
 
 const ID = '11111111-2222-4333-8444-555555555555';
+const ORG = '99999999-2222-4333-8444-555555555555';
 
 const complete: Answers = {
   serviceName: ' Acme Analytics ',
@@ -41,6 +42,9 @@ function setup(draft: DraftRecord | null, overrides: Partial<RequestStore> = {})
   const calls: { id: string; answers: Answers; risk: RiskResult; stages: PlannedStage[] }[] = [];
   const tokens: string[] = [];
   const store: RequestStore = {
+    async getReviewTemplates() {
+      return {};
+    },
     async getAsUser(token) {
       tokens.push(token);
       return draft;
@@ -66,7 +70,7 @@ function setup(draft: DraftRecord | null, overrides: Partial<RequestStore> = {})
 
 describe('POST /v1/requests/:id/submit', () => {
   it('validates, computes the risk tier on the server and submits cleaned answers', async () => {
-    const { submit, calls, tokens } = setup({ id: ID, status: 'draft', answers: complete });
+    const { submit, calls, tokens } = setup({ id: ID, org_id: ORG, status: 'draft', answers: complete });
     const res = await submit();
     expect(res.status).toBe(200);
     // Restricted 5 + production access 2 = 7 -> High.
@@ -79,7 +83,7 @@ describe('POST /v1/requests/:id/submit', () => {
   });
 
   it('starts the stages that the tier and answers require', async () => {
-    const { submit, calls } = setup({ id: ID, status: 'draft', answers: complete });
+    const { submit, calls } = setup({ id: ID, org_id: ORG, status: 'draft', answers: complete });
     await submit();
     const stages = calls[0]!.stages;
     // High risk, free service: everything except the finance review.
@@ -95,8 +99,29 @@ describe('POST /v1/requests/:id/submit', () => {
     expect(due).toBeLessThan(Date.now() + 8 * 86_400_000);
   });
 
+  it("copies the organization's review form into the stage, and falls back to the default for a broken one", async () => {
+    const custom = { fields: [{ key: 'q', label: 'Q', type: 'text', required: true }], rules: [] };
+    const orgs: string[] = [];
+    let forms: Record<string, unknown> = { 'Security review': custom };
+    const { submit, calls } = setup(
+      { id: ID, org_id: ORG, status: 'draft', answers: complete },
+      {
+        async getReviewTemplates(orgId) {
+          orgs.push(orgId);
+          return forms;
+        },
+      },
+    );
+    await submit();
+    expect(orgs).toEqual([ORG]);
+    expect(calls[0]!.stages.find((s) => s.name === 'Security review')!.reviewFields).toEqual(custom.fields);
+    forms = { 'Security review': { fields: [{ key: '1bad' }], rules: [] } };
+    await submit();
+    expect(calls[1]!.stages.find((s) => s.name === 'Security review')!.reviewFields.map((f) => f.key)).toContain('certifications');
+  });
+
   it('requires a bearer token', async () => {
-    const { submit, calls, tokens } = setup({ id: ID, status: 'draft', answers: complete });
+    const { submit, calls, tokens } = setup({ id: ID, org_id: ORG, status: 'draft', answers: complete });
     expect((await submit({})).status).toBe(401);
     expect((await submit({ authorization: 'Basic abc' })).status).toBe(401);
     expect(tokens).toEqual([]);
@@ -121,14 +146,14 @@ describe('POST /v1/requests/:id/submit', () => {
   });
 
   it('refuses a request that is already submitted', async () => {
-    const { submit, calls } = setup({ id: ID, status: 'submitted', answers: complete });
+    const { submit, calls } = setup({ id: ID, org_id: ORG, status: 'submitted', answers: complete });
     expect((await submit()).status).toBe(409);
     expect(calls).toEqual([]);
   });
 
   it('answers 409 when the draft is submitted concurrently', async () => {
     const { submit } = setup(
-      { id: ID, status: 'draft', answers: complete },
+      { id: ID, org_id: ORG, status: 'draft', answers: complete },
       {
         async submit() {
           throw new NotADraftError();
@@ -139,7 +164,7 @@ describe('POST /v1/requests/:id/submit', () => {
   });
 
   it('returns field errors for incomplete answers and does not submit', async () => {
-    const { submit, calls } = setup({ id: ID, status: 'draft', answers: { ...complete, serviceName: '', dataClassification: 'Secret' } });
+    const { submit, calls } = setup({ id: ID, org_id: ORG, status: 'draft', answers: { ...complete, serviceName: '', dataClassification: 'Secret' } });
     const res = await submit();
     expect(res.status).toBe(422);
     const body = (await res.json()) as { fields: Record<string, string> };

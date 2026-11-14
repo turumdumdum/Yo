@@ -17,6 +17,7 @@ import {
 } from './api';
 import { DomainsSection } from './DomainsSection';
 import { InviteSection } from './InviteSection';
+import { ReviewFormEditor } from './ReviewFormEditor';
 
 interface Props {
   supabase: SupabaseClient;
@@ -176,6 +177,8 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
       )}
 
       <DomainsSection supabase={supabase} organization={organization} domains={domains} members={members} onChanged={reloadAll} />
+
+      <ReviewFormEditor supabase={supabase} orgId={organization.id} />
 
       <section className="card" aria-labelledby="settings-heading">
         <h2 id="settings-heading">Review settings</h2>

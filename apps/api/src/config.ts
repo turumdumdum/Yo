@@ -28,13 +28,16 @@ export function optionsFromEnv(env: Env): AppOptions {
     throw new Error(`Unknown AI_PROVIDER "${env.AI_PROVIDER}". Supported: parallel.`);
   }
 
+  const store = supabaseRequestStore({
+    url: required('SUPABASE_URL'),
+    publishableKey: required('SUPABASE_PUBLISHABLE_KEY'),
+    serviceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
+  });
+
   return {
     ai,
     webOrigin: required('WEB_ORIGIN'),
-    requests: supabaseRequestStore({
-      url: required('SUPABASE_URL'),
-      publishableKey: required('SUPABASE_PUBLISHABLE_KEY'),
-      serviceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
-    }),
+    requests: store,
+    admin: store,
   };
 }

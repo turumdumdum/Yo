@@ -16,10 +16,10 @@ function fakeFetch(status: number, body: unknown) {
 
 describe('supabaseRequestStore', () => {
   it("reads with the user's token and the publishable key, never the secret key", async () => {
-    const { impl, calls } = fakeFetch(200, [{ id: ID, status: 'draft', answers: {} }]);
+    const { impl, calls } = fakeFetch(200, [{ id: ID, org_id: 'o', status: 'draft', answers: {} }]);
     const row = await supabaseRequestStore(config, impl).getAsUser('user-token', ID);
-    expect(row).toEqual({ id: ID, status: 'draft', answers: {} });
-    expect(calls[0]!.url).toBe(`https://project.supabase.co/rest/v1/requests?id=eq.${ID}&select=id%2Cstatus%2Canswers`);
+    expect(row).toEqual({ id: ID, org_id: 'o', status: 'draft', answers: {} });
+    expect(calls[0]!.url).toBe(`https://project.supabase.co/rest/v1/requests?id=eq.${ID}&select=id%2Corg_id%2Cstatus%2Canswers`);
     expect(calls[0]!.init!.headers).toEqual({ apikey: 'pub-key', authorization: 'Bearer user-token' });
   });
 
@@ -36,7 +36,7 @@ describe('supabaseRequestStore', () => {
   it('submits through the service-role RPC', async () => {
     const { impl, calls } = fakeFetch(200, { id: ID, status: 'in_review', risk_tier: 'Low', risk_score: 0, risk_reasons: [], submitted_at: 'now' });
     await supabaseRequestStore(config, impl).submit(ID, { serviceName: 'A' }, { tier: 'Low', score: 0, reasons: [] }, [
-      { name: 'License check', status: 'In review', slaBusinessDays: 5, slaDueAt: '2026-11-20T15:30:00.000Z', note: null, checklist: ['Terms ok'] },
+      { name: 'License check', status: 'In review', slaBusinessDays: 5, slaDueAt: '2026-11-20T15:30:00.000Z', note: null, checklist: ['Terms ok'], reviewFields: [], reviewRules: [] },
     ]);
     expect(calls[0]!.url).toBe('https://project.supabase.co/rest/v1/rpc/submit_request');
     expect((calls[0]!.init!.headers as Record<string, string>).apikey).toBe('secret-key');
@@ -47,7 +47,7 @@ describe('supabaseRequestStore', () => {
       p_risk_score: 0,
       p_risk_reasons: [],
       p_stages: [
-        { name: 'License check', status: 'In review', note: null, sla_business_days: 5, sla_due_at: '2026-11-20T15:30:00.000Z', checklist: ['Terms ok'] },
+        { name: 'License check', status: 'In review', note: null, sla_business_days: 5, sla_due_at: '2026-11-20T15:30:00.000Z', checklist: ['Terms ok'], review_fields: [], review_rules: [] },
       ],
     });
   });

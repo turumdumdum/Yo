@@ -1,10 +1,12 @@
 import {
   computeRiskTier,
+  parseReviewTemplate,
   planStages,
   riskInputFromAnswers,
   validateAnswers,
   type Answers,
   type PlannedStage,
+  type ReviewTemplate,
   type RiskResult,
 } from '@app/shared';
 import { Hono } from 'hono';
@@ -14,6 +16,7 @@ import { Hono } from 'hono';
 
 export interface DraftRecord {
   id: string;
+  org_id: string;
   status: string;
   answers: Answers;
 }
@@ -39,8 +42,22 @@ export interface RequestStore {
    * caller may see, so null means "does not exist for this user".
    */
   getAsUser(accessToken: string, requestId: string): Promise<DraftRecord | null>;
+  /** The organization's own review forms by stage name, unvalidated. Runs with backend privileges. */
+  getReviewTemplates(orgId: string): Promise<Record<string, unknown>>;
   /** Marks a draft as submitted and starts its stages, atomically. Runs with backend privileges. */
   submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[]): Promise<SubmittedRecord>;
+}
+
+/** The organization's valid review forms. A stored form that fails validation is skipped, so the default applies. */
+export async function reviewTemplates(store: RequestStore, orgId: string): Promise<Record<string, ReviewTemplate>> {
+  const stored = await store.getReviewTemplates(orgId);
+  const valid: Record<string, ReviewTemplate> = {};
+  for (const [stage, raw] of Object.entries(stored)) {
+    const parsed = parseReviewTemplate(raw);
+    if ('template' in parsed) valid[stage] = parsed.template;
+    else console.warn(`Ignoring the stored review form of "${stage}": ${parsed.error}`);
+  }
+  return valid;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -72,7 +89,7 @@ export function requestRoutes(store: RequestStore) {
 
     // Triage: the tier decides which review stages start.
     const risk = computeRiskTier(riskInputFromAnswers(cleaned));
-    const stages = planStages(risk.tier, cleaned, new Date());
+    const stages = planStages(risk.tier, cleaned, new Date(), undefined, await reviewTemplates(store, request.org_id));
     try {
       const submitted = await store.submit(id, cleaned, risk, stages);
       return c.json({

@@ -1,10 +1,11 @@
+import type { Answers } from '@app/shared';
 import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { RequestStatusBadge, RiskBadge } from '../components/Badge';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import { AnswerSummary } from './AnswerSummary';
-import { listStages, loadRequest, type RequestRow, type StageRow } from './api';
+import { listStages, loadRequest, requestReviewAnswers, type RequestRow, type StageRow } from './api';
 import { StageList } from './StageList';
 import type { ReviewContext } from './StagePanel';
 
@@ -26,14 +27,20 @@ const OUTCOME: Record<string, string> = {
 export function RequestDetail({ supabase, request: initial, context, initialStageId, onClose }: Props) {
   const [request, setRequest] = useState(initial);
   const [stages, setStages] = useState<StageRow[] | null>(null);
+  const [reviewAnswers, setReviewAnswers] = useState<Record<string, Answers>>({});
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
       // The request itself too: the last stage decision changes its status.
-      const [fresh, rows] = await Promise.all([loadRequest(supabase, initial.id), listStages(supabase, initial.id)]);
+      const [fresh, rows, review] = await Promise.all([
+        loadRequest(supabase, initial.id),
+        listStages(supabase, initial.id),
+        requestReviewAnswers(supabase, initial.id),
+      ]);
       if (fresh) setRequest(fresh);
       setStages(rows);
+      setReviewAnswers(review);
       setError(null);
     } catch (e) {
       setError(errorMessage(e));
@@ -75,6 +82,7 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
               supabase={supabase}
               stages={stages}
               answers={request.answers}
+              reviewAnswers={reviewAnswers}
               requesterId={request.requester_id}
               context={context}
               initialStageId={initialStageId}

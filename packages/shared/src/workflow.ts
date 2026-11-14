@@ -1,5 +1,6 @@
 import { DEFAULT_STAGES, RISK_TIERS, type RiskTier, type StageStatus } from './domain';
 import type { Answers } from './requestForm';
+import { defaultReviewTemplate, type ReviewFieldDef, type ReviewRule, type ReviewTemplate } from './reviewForms';
 
 // Default workflow (CLAUDE.md §6): after triage the required review stages start in
 // parallel. Which stages are required is configuration, not code, so that the workflow
@@ -94,6 +95,9 @@ export interface PlannedStage {
   note: string | null;
   /** Checklist labels for the reviewer; empty for stages that are not required. */
   checklist: string[];
+  /** The review form the reviewer fills in, copied into the stage. */
+  reviewFields: ReviewFieldDef[];
+  reviewRules: ReviewRule[];
 }
 
 export const STAGE_DECISIONS = ['Approved', 'Approved with conditions', 'Rejected'] as const;
@@ -125,6 +129,8 @@ export function planStages(
   answers: Answers,
   submittedAt: Date,
   config: WorkflowConfig = DEFAULT_WORKFLOW,
+  /** The organization's review forms by stage name; stages without one get the default form. */
+  reviewTemplates: Readonly<Record<string, ReviewTemplate>> = {},
 ): PlannedStage[] {
   return config.stages.map((rule) => {
     let note: string | null = null;
@@ -136,7 +142,10 @@ export function planStages(
         note = `Not required: ${rule.onlyWhen.label} is ${typeof value === 'string' ? value : 'not answered'}`;
       }
     }
-    if (note) return { name: rule.name, status: 'Not required', slaBusinessDays: null, slaDueAt: null, note, checklist: [] };
+    if (note) {
+      return { name: rule.name, status: 'Not required', slaBusinessDays: null, slaDueAt: null, note, checklist: [], reviewFields: [], reviewRules: [] };
+    }
+    const form = reviewTemplates[rule.name] ?? defaultReviewTemplate(rule.name);
     return {
       name: rule.name,
       status: 'In review',
@@ -144,6 +153,8 @@ export function planStages(
       slaDueAt: addBusinessDays(submittedAt, rule.slaBusinessDays).toISOString(),
       note: null,
       checklist: [...rule.checklist],
+      reviewFields: form.fields,
+      reviewRules: form.rules,
     };
   });
 }

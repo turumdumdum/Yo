@@ -4,7 +4,10 @@ import { asAnon, asUser, createUser, pool, resetDatabase } from './db';
 // Proves that org A cannot read or write org B's data (CLAUDE.md §8).
 // Every new tenant table must be added to TENANT_TABLES and get its own cases here.
 
-const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages'];
+/** The organization column of a table, readable by every signed-in member. */
+const column = (table: string) => (table === 'organizations' ? 'id' : 'org_id');
+
+const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates'];
 
 let adminA: string; // org admin of org A
 let requesterA: string; // requester in org A
@@ -62,6 +65,10 @@ beforeAll(async () => {
     `insert into public.request_stages (org_id, request_id, position, name, status)
      select r.org_id, r.id, 1, 'License check', 'In review' from public.requests r`,
   );
+  await pool.query(
+    `insert into public.review_templates (org_id, stage_name, fields) values ($1, 'Security review', '[]'), ($2, 'Security review', '[]')`,
+    [orgA, orgB],
+  );
 });
 
 afterAll(async () => {
@@ -90,19 +97,18 @@ describe('schema guard', () => {
 
 describe('reads', () => {
   it.each(TENANT_TABLES)('org A admin sees only org A rows in %s', async (table) => {
-    const column = table === 'organizations' ? 'id' : 'org_id';
-    const rows = await asUser(adminA, async (c) => (await c.query(`select ${column} as org from public.${table}`)).rows);
+    const rows = await asUser(adminA, async (c) => (await c.query(`select ${column(table)} as org from public.${table}`)).rows);
     expect(rows.length).toBeGreaterThan(0);
     expect(new Set(rows.map((r) => r.org))).toEqual(new Set([orgA]));
   });
 
   it.each(TENANT_TABLES)('a signed-in user without a membership sees nothing in %s', async (table) => {
-    const rows = await asUser(outsider, async (c) => (await c.query(`select * from public.${table}`)).rows);
+    const rows = await asUser(outsider, async (c) => (await c.query(`select ${column(table)} from public.${table}`)).rows);
     expect(rows).toEqual([]);
   });
 
   it.each(TENANT_TABLES)('a visitor without a session cannot read %s', async (table) => {
-    await expect(asAnon((c) => c.query(`select * from public.${table}`))).rejects.toThrow(/permission denied/);
+    await expect(asAnon((c) => c.query(`select ${column(table)} from public.${table}`))).rejects.toThrow(/permission denied/);
   });
 
   it('cannot create an organization without a session', async () => {

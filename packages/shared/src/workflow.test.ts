@@ -94,6 +94,18 @@ describe('planStages (custom workflow)', () => {
     for (const rule of DEFAULT_WORKFLOW.stages) expect(rule.checklist.length).toBeGreaterThan(0);
   });
 
+  it('gives the security review its form, from the organization when it has one', () => {
+    const byDefault = planStages('High', {}, friday).find((s) => s.name === 'Security review')!;
+    expect(byDefault.reviewFields.map((f) => f.key)).toContain('certifications');
+    expect(byDefault.reviewRules.length).toBeGreaterThan(0);
+    const custom = { fields: [{ key: 'q', label: 'Q', type: 'text' as const, required: true }], rules: [] };
+    const configured = planStages('High', {}, friday, DEFAULT_WORKFLOW, { 'Security review': custom });
+    expect(configured.find((s) => s.name === 'Security review')!.reviewFields).toEqual(custom.fields);
+    // Stages without a form, and stages that are not required, get none.
+    expect(configured.find((s) => s.name === 'License check')!.reviewFields).toEqual([]);
+    expect(planStages('Low', {}, friday).find((s) => s.name === 'Security review')!.reviewFields).toEqual([]);
+  });
+
   it('points each default stage at existing form steps', () => {
     for (const rule of DEFAULT_WORKFLOW.stages) {
       expect(rule.focusSteps.length).toBeGreaterThan(0);

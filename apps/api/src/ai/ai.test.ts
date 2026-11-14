@@ -108,6 +108,9 @@ describe('answer check', () => {
 
 function setup(draft: DraftRecord | null, provider?: AiProvider) {
   const store: RequestStore = {
+    async getReviewTemplates() {
+      return {};
+    },
     async getAsUser() {
       return draft;
     },
@@ -135,7 +138,7 @@ function fakeProvider(result: AiTaskResult | Error) {
 }
 
 describe('AI routes', () => {
-  const draft: DraftRecord = { id: ID, status: 'draft', answers };
+  const draft: DraftRecord = { id: ID, org_id: ID, status: 'draft', answers };
 
   it('are off by default: the core works without any AI', async () => {
     const { app, post } = setup(draft);

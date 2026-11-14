@@ -1,11 +1,12 @@
-import { focusStepsForStage, type Answers, type StageDecision } from '@app/shared';
-import { useId, useState } from 'react';
+import { focusStepsForStage, validateReviewAnswers, type Answers, type StageDecision } from '@app/shared';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import type { Member } from '../org/api';
 import { AnswerSummary } from './AnswerSummary';
-import { assignReviewer, decideStage, setChecklistItem, type StageRow } from './api';
+import { assignReviewer, decideStage, saveReviewAnswers, setChecklistItem, type StageRow } from './api';
+import { ReviewForm } from './ReviewForm';
 
 export interface ReviewContext {
   userId: string;
@@ -19,6 +20,8 @@ interface Props {
   supabase: SupabaseClient;
   stage: StageRow;
   answers: Answers;
+  /** This stage's review answers; undefined when the viewer may not see them. */
+  reviewAnswers: Answers | undefined;
   requesterId: string;
   context: ReviewContext;
   /** Called after any change so the parent reloads the stages and the request. */
@@ -31,7 +34,7 @@ const REVIEWER_ROLES = new Set(['org_admin', 'process_manager', 'reviewer']);
 const formatDateTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
 /** Everything about one stage: who reviews it, the checklist, and the decision. */
-export function StagePanel({ supabase, stage, answers, requesterId, context, onChanged }: Props) {
+export function StagePanel({ supabase, stage, answers, reviewAnswers, requesterId, context, onChanged }: Props) {
   const id = useId();
   const [comment, setComment] = useState('');
   const [conditions, setConditions] = useState('');
@@ -39,6 +42,40 @@ export function StagePanel({ supabase, stage, answers, requesterId, context, onC
   const [busy, setBusy] = useState(false);
   // Ticks show at once and are dropped again once the server answered, either way.
   const [ticking, setTicking] = useState<Record<number, boolean>>({});
+
+  // Review form answers: kept here, saved shortly after each change.
+  const [review, setReview] = useState<Answers>(reviewAnswers ?? {});
+  const [reviewState, setReviewState] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved');
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const storedReview = useRef(review);
+  const latestReview = useRef(review);
+  latestReview.current = review;
+
+  async function flushReview(): Promise<boolean> {
+    const snapshot = latestReview.current;
+    if (snapshot === storedReview.current) return true;
+    setReviewState('saving');
+    try {
+      await saveReviewAnswers(supabase, stage.id, snapshot);
+      storedReview.current = snapshot;
+      setReviewState(latestReview.current === snapshot ? 'saved' : 'unsaved');
+      setReviewError(null);
+      return true;
+    } catch (e) {
+      setReviewState('error');
+      setReviewError(errorMessage(e));
+      return false;
+    }
+  }
+
+  useEffect(() => {
+    if (review === storedReview.current) return;
+    setReviewState('unsaved');
+    const timer = setTimeout(() => void flushReview(), 800);
+    return () => clearTimeout(timer);
+    // flushReview only reads refs and stable props.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [review]);
 
   const open = OPEN.has(stage.status);
   const mayReview = context.isManager || stage.reviewer_id === context.userId;
@@ -48,6 +85,9 @@ export function StagePanel({ supabase, stage, answers, requesterId, context, onC
     userId ? (context.members.find((m) => m.user_id === userId)?.email ?? 'a former member') : null;
   const isChecked = (index: number) => ticking[index] ?? stage.checklist[index]!.checked;
   const allChecked = stage.checklist.every((_, index) => isChecked(index));
+  const hasForm = stage.review_fields.length > 0;
+  const missing = validateReviewAnswers(stage.review_fields, review, true);
+  const formComplete = Object.keys(missing).length === 0;
   const focus = focusStepsForStage(stage.name);
 
   async function run(action: () => Promise<void>) {
@@ -72,7 +112,10 @@ export function StagePanel({ supabase, stage, answers, requesterId, context, onC
       setError('Explain in the comment why the stage is rejected.');
       return;
     }
-    void run(() => decideStage(supabase, stage.id, decision, comment, conditions));
+    void run(async () => {
+      if (!(await flushReview())) throw new Error('Could not save the review form. Fix it before deciding.');
+      await decideStage(supabase, stage.id, decision, comment, conditions);
+    });
   }
 
   return (
@@ -133,6 +176,28 @@ export function StagePanel({ supabase, stage, answers, requesterId, context, onC
         </details>
       )}
 
+      {hasForm && (canAct || reviewAnswers !== undefined) && (
+        <div className="stage-review-form">
+          <div className="form-top">
+            <h3>{stage.name} form</h3>
+            {canAct && (
+              <p className="save-state" role="status" data-state={reviewState}>
+                {{ saved: 'Saved', saving: 'Saving…', unsaved: 'Unsaved changes', error: 'Not saved' }[reviewState]}
+              </p>
+            )}
+          </div>
+          <FormError message={reviewError} />
+          <ReviewForm
+            fields={stage.review_fields}
+            rules={stage.review_rules}
+            answers={review}
+            requestAnswers={answers}
+            onChange={canAct ? (key, value) => setReview((current) => ({ ...current, [key]: value })) : null}
+            missing={canAct ? Object.fromEntries(Object.keys(missing).map((k) => [k, 'Answer this before approving.'])) : {}}
+          />
+        </div>
+      )}
+
       {stage.checklist.length > 0 && (
         <fieldset className="field">
           <legend>Checklist</legend>
@@ -180,11 +245,19 @@ export function StagePanel({ supabase, stage, answers, requesterId, context, onC
           </div>
           <FormError message={error} />
           {!allChecked && <p className="field-hint">Tick every checklist item to approve without conditions.</p>}
+          {hasForm && !formComplete && (
+            <p className="field-hint">Answer the required questions of the form to approve, with or without conditions.</p>
+          )}
           <div className="form-actions">
-            <button type="button" className="button" disabled={busy || !allChecked} onClick={() => decide('Approved')}>
+            <button type="button" className="button" disabled={busy || !allChecked || !formComplete} onClick={() => decide('Approved')}>
               Approve
             </button>
-            <button type="button" className="button button-secondary" disabled={busy} onClick={() => decide('Approved with conditions')}>
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={busy || !formComplete}
+              onClick={() => decide('Approved with conditions')}
+            >
               Approve with conditions
             </button>
             <button type="button" className="button button-danger" disabled={busy} onClick={() => decide('Rejected')}>

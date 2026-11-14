@@ -21,6 +21,8 @@ interface Props {
   supabase: SupabaseClient;
   stages: StageRow[];
   answers: Answers;
+  /** Review answers by stage id, for viewers who may see them. */
+  reviewAnswers: Record<string, Answers>;
   requesterId: string;
   context: ReviewContext;
   /** Stage to show expanded at first, for example when arriving from the review queue. */
@@ -29,7 +31,7 @@ interface Props {
 }
 
 /** Review stages of a submitted request, with progress, reviewer, SLA and the review itself. */
-export function StageList({ supabase, stages, answers, requesterId, context, initialStageId, onChanged }: Props) {
+export function StageList({ supabase, stages, answers, reviewAnswers, requesterId, context, initialStageId, onChanged }: Props) {
   const [expanded, setExpanded] = useState<string | null>(initialStageId ?? null);
 
   if (stages.length === 0) {
@@ -84,6 +86,7 @@ export function StageList({ supabase, stages, answers, requesterId, context, ini
                   supabase={supabase}
                   stage={stage}
                   answers={answers}
+                  reviewAnswers={reviewAnswers[stage.id]}
                   requesterId={requesterId}
                   context={context}
                   onChanged={onChanged}
