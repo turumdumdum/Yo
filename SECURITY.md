@@ -16,7 +16,7 @@ Especially valuable: anything that lets one organization read or write another o
 
 ## Known gaps
 
-- Uploaded files are not yet scanned for malware. File uploads are not implemented yet; this gap must be addressed or clearly documented before they ship.
+- Uploaded files are not scanned for malware. Uploads are limited to a fixed list of document and image types and 25 MB, are stored in a private bucket, and are only served as downloads through links that expire after a minute, but a harmful document can still be attached and downloaded. The app says so next to every file list.
 - No release has been through an external penetration test.
 
 ## Supported versions

@@ -97,6 +97,7 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
         key={open.request.id}
         supabase={supabase}
         requestId={open.request.id}
+        userId={user.id}
         initialAnswers={open.request.answers}
         onSubmitted={() => void openRequest(open.request.id)}
         onClose={close}

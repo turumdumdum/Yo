@@ -1,6 +1,7 @@
 import { parallelProvider } from './ai/parallel';
 import type { AiProvider } from './ai/provider';
 import type { AppOptions } from './app';
+import { supabaseAttachmentStore } from './supabaseAttachments';
 import { supabaseRequestStore } from './supabaseStore';
 
 type Env = Record<string, string | undefined>;
@@ -28,16 +29,18 @@ export function optionsFromEnv(env: Env): AppOptions {
     throw new Error(`Unknown AI_PROVIDER "${env.AI_PROVIDER}". Supported: parallel.`);
   }
 
-  const store = supabaseRequestStore({
+  const supabase = {
     url: required('SUPABASE_URL'),
     publishableKey: required('SUPABASE_PUBLISHABLE_KEY'),
     serviceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
-  });
+  };
+  const store = supabaseRequestStore(supabase);
 
   return {
     ai,
     webOrigin: required('WEB_ORIGIN'),
     requests: store,
     admin: store,
+    attachments: supabaseAttachmentStore(supabase),
   };
 }

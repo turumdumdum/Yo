@@ -13,6 +13,7 @@ import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import { AiAssist } from './AiAssist';
 import { AnswerSummary } from './AnswerSummary';
+import { Attachments } from './Attachments';
 import { aiStatus, deleteDraft, saveAnswers, submitRequest, SubmitError } from './api';
 import { FieldInput } from './FieldInput';
 
@@ -31,12 +32,13 @@ const SAVE_LABELS: Record<SaveState, string> = {
 interface Props {
   supabase: SupabaseClient;
   requestId: string;
+  userId: string;
   initialAnswers: Answers;
   onSubmitted: () => void;
   onClose: () => void;
 }
 
-export function RequestForm({ supabase, requestId, initialAnswers, onSubmitted, onClose }: Props) {
+export function RequestForm({ supabase, requestId, userId, initialAnswers, onSubmitted, onClose }: Props) {
   const [answers, setAnswers] = useState<Answers>(initialAnswers);
   const [step, setStep] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -234,7 +236,11 @@ export function RequestForm({ supabase, requestId, initialAnswers, onSubmitted, 
 
           {step === LAST_STEP && (
             <>
-              <p className="field-hint">File attachments (quote, contract draft, DPA, security reports) are not available yet.</p>
+              <h2>Attachments</h2>
+              <p className="field-hint">
+                Optional: the quote, contract draft, DPA, SOC 2 or ISO report, security questionnaire. Reviewers will see them.
+              </p>
+              <Attachments supabase={supabase} requestId={requestId} userId={userId} canUpload canRemoveOwn nameOf={() => 'you'} />
               {hints.length > 0 && (
                 <section className="hints" aria-labelledby="hints-heading">
                   <h2 id="hints-heading">Before you submit</h2>

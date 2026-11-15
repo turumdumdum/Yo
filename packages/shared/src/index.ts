@@ -1,3 +1,4 @@
+export * from './attachments';
 export * from './reviewForms';
 export * from './inviteImport';
 export * from './ai';

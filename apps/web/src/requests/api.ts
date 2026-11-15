@@ -1,3 +1,4 @@
+import { ATTACHMENT_BUCKET } from '@app/shared';
 import type {
   AiRemark,
   AiStatus,
@@ -298,4 +299,60 @@ export async function saveReviewTemplate(supabase: SupabaseClient, stage: string
 export async function resetReviewTemplate(supabase: SupabaseClient, stage: string): Promise<void> {
   const res = await callApi(supabase, `/v1/review-forms/${encodeURIComponent(stage)}`, 'DELETE');
   if (!res.ok) throw await apiError(res, 'The form could not be reset.');
+}
+
+export interface AttachmentRow {
+  id: string;
+  kind: string;
+  filename: string;
+  size_bytes: number;
+  uploaded_by: string | null;
+  uploaded_at: string | null;
+}
+
+export async function listAttachments(supabase: SupabaseClient, requestId: string): Promise<AttachmentRow[]> {
+  const { data, error } = await supabase
+    .from('attachments')
+    .select('id,kind,filename,size_bytes,uploaded_by,uploaded_at')
+    .eq('request_id', requestId)
+    .eq('status', 'uploaded')
+    .order('created_at');
+  if (error) throw error;
+  return data as AttachmentRow[];
+}
+
+/**
+ * Uploads a file in three steps: the API checks and registers it and returns a one-time
+ * token, the file goes straight to storage with that token, and the API confirms it arrived.
+ */
+export async function uploadAttachment(supabase: SupabaseClient, requestId: string, file: File, kind: string): Promise<void> {
+  const started = await callApi(supabase, `/v1/requests/${requestId}/attachments`, 'POST', 30_000, {
+    filename: file.name,
+    size: file.size,
+    kind,
+  });
+  if (!started.ok) throw await apiError(started, 'The file could not be attached.');
+  const { id, path, token, contentType } = (await started.json()) as { id: string; path: string; token: string; contentType: string };
+
+  const { error } = await supabase.storage.from(ATTACHMENT_BUCKET).uploadToSignedUrl(path, token, file, { contentType });
+  if (error) {
+    // Forget the unfinished upload so it does not count towards the limit.
+    await callApi(supabase, `/v1/attachments/${id}`, 'DELETE').catch(() => undefined);
+    throw new SubmitError(`The upload failed. ${error.message}`);
+  }
+
+  const finished = await callApi(supabase, `/v1/attachments/${id}/complete`, 'POST');
+  if (!finished.ok) throw await apiError(finished, 'The upload could not be confirmed.');
+}
+
+/** A link that downloads the file, valid for about a minute. The download is recorded in the audit log. */
+export async function attachmentDownloadUrl(supabase: SupabaseClient, id: string): Promise<string> {
+  const res = await callApi(supabase, `/v1/attachments/${id}/download`, 'GET');
+  if (!res.ok) throw await apiError(res, 'The file could not be downloaded.');
+  return ((await res.json()) as { url: string }).url;
+}
+
+export async function deleteAttachment(supabase: SupabaseClient, id: string): Promise<void> {
+  const res = await callApi(supabase, `/v1/attachments/${id}`, 'DELETE');
+  if (!res.ok) throw await apiError(res, 'The file could not be removed.');
 }

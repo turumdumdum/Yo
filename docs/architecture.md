@@ -56,13 +56,30 @@ The decisions behind this layout are in [CLAUDE.md](../CLAUDE.md) §3 and §8. T
 - `review_answers` is not readable through the table: the requester cannot see the security assessment. `request_review_answers` returns the answers to org admins, process managers, auditors and the request's reviewers.
 - Concerns (flagged values, old reports, unmet rules) are shown to the reviewer and never block a decision.
 
+## Questions to the requester
+
+- `ask_requester` (whoever may review the stage) stores a question, moves the stage to `Waiting for requester` and stops its SLA clock (`sla_paused`, `sla_paused_at`). A second question keeps the original pause start.
+- `answer_info_request` (the requester only) stores the answer. When the stage has no open question left it returns to `In review` and its due date moves out by the length of the pause, rolled forward off a weekend. A stage decided while waiting stays decided; a late answer is kept.
+- Questions and answers are visible to everyone who can see the request. Internal reviewer notes are not built.
+- Nobody is notified by email yet; the requester sees "Action required from you" in the app.
+
+## Attachments
+
+- Files live in the private Supabase Storage bucket `attachments`, which has no access policies: only the service role can reach it. The browser never has standing access to storage.
+- Upload: the API checks the file (type from the extension, size, kind) and calls `register_attachment` with the caller's token, so the database decides whether that person may attach to that request. The API then signs a one-time upload URL for the path `org_id/request_id/attachment_id`; the browser uploads straight to storage; the API confirms the object exists, checks its real size and marks the attachment uploaded. The bucket itself also enforces 25 MB and the allowed MIME types.
+- Download: the API reads the attachment with the caller's token (RLS: whoever may see the request), writes `attachment.downloaded` to the audit log and only then returns a signed URL valid for 60 seconds.
+- Who may attach: the requester on a draft or a request in review; org admins, process managers and assigned reviewers on a request in review. Nothing is added to a decided request. The person who added a file can remove it while the request is a draft.
+- Allowed: PDF, PNG, JPG, DOCX, XLSX, PPTX, CSV, TXT; 20 files per request. Archives and executables are not accepted.
+- **Open gap: files are not scanned for malware.** The UI says so next to every file list.
+- Not built: evidence expiry dates and reminders (CLAUDE.md §7), clean-up of uploads that were registered but never finished (they stop counting after an hour, the rows remain), attachments on the answer to a question.
+
 ## AI plugin (optional)
 
 CLAUDE.md §2 applies: the core works without AI, the plugin is off by default and uses the operator's own key. The roadmap lists it under stage 5; the owner asked for it earlier.
 
 - `apps/api/src/ai/provider.ts` defines the only thing a provider must do: run a task (instructions, input, JSON schema) and return JSON. `parallel.ts` implements it for Parallel's Task API. Another model or API is added by implementing the same interface and naming it in `config.ts`.
 - `AI_PROVIDER` unset means no provider: `GET /v1/ai` answers `enabled: false`, the AI endpoints answer 404 and the web app shows no AI buttons.
-- Vendor lookup sends only the service name, vendor name and website. The answer check sends the form answers with owner names replaced by "Named" / "Not required". Attachments are never sent (there are none yet).
+- Vendor lookup sends only the service name, vendor name and website. The answer check sends the form answers with owner names replaced by "Named" / "Not required". Attachments are never sent to the AI provider.
 - Model output is untrusted. Each suggested value passes the same validation as a typed answer, only a fixed list of fields can be suggested, and the backend never writes suggestions to the request: the requester applies them one by one. Remarks are advice and never block submission.
 - One AI call per request every 10 seconds, counted per API process. This is not a substitute for real rate limiting.
 - Not done: a per-organization switch and per-organization keys (needed for the hosted version), audit log entries for AI use, cost limits.

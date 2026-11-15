@@ -4,6 +4,7 @@ import { adminRoutes, type AdminStore } from './admin';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AiProvider } from './ai/provider';
 import { aiRoutes } from './ai/routes';
+import { attachmentRoutes, type AttachmentStore } from './attachments';
 import { requestRoutes, type RequestStore } from './requests';
 
 // Platform-neutral application. Only Web-standard APIs here: anything specific to
@@ -16,6 +17,7 @@ export interface AppOptions {
   /** Optional AI plugin. Off unless configured; the core works without it. */
   ai?: AiProvider;
   admin?: AdminStore;
+  attachments?: AttachmentStore;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -48,6 +50,7 @@ export function createApp(options: AppOptions = {}) {
     app.route('/v1', aiRoutes(options.requests, options.ai));
   }
   if (options.admin) app.route('/v1', adminRoutes(options.admin));
+  if (options.attachments) app.route('/v1', attachmentRoutes(options.attachments));
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

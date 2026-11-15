@@ -5,6 +5,7 @@ import { RequestStatusBadge, RiskBadge } from '../components/Badge';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import { AnswerSummary } from './AnswerSummary';
+import { Attachments } from './Attachments';
 import { listInfoRequests, listStages, loadRequest, requestReviewAnswers, type InfoRequest, type RequestRow, type StageRow } from './api';
 import { ActionRequired } from './Questions';
 import { StageList } from './StageList';
@@ -109,6 +110,24 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
           )}
         </section>
       )}
+
+      <section className="card" aria-labelledby="attachments-heading">
+        <h2 id="attachments-heading">Attachments</h2>
+        <Attachments
+          supabase={supabase}
+          requestId={request.id}
+          userId={context.userId}
+          // While in review: the requester, managers and reviewers of this request.
+          canUpload={
+            (request.status === 'in_review' || request.status === 'submitted') &&
+            (request.requester_id === context.userId ||
+              context.isManager ||
+              (stages ?? []).some((st) => st.reviewer_id === context.userId))
+          }
+          canRemoveOwn={false}
+          nameOf={(userId) => (userId === context.userId ? 'you' : (context.members.find((m) => m.user_id === userId)?.email ?? 'a former member'))}
+        />
+      </section>
 
       {request.risk_tier && (
         <section className="card" aria-labelledby="triage-heading">
