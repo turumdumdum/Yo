@@ -13,7 +13,7 @@ type Env = Record<string, string | undefined>;
 export function optionsFromEnv(env: Env): AppOptions {
   const required = (name: string): string => {
     const value = env[name];
-    if (!value) throw new Error(`Missing environment variable ${name}. See .env.example.`);
+    if (!value) throw new Error(`Missing environment variable ${name}. Set it in apps/api/.env (see apps/api/.env.example).`);
     return value;
   };
   // The AI plugin is off unless a provider is named. Add other providers here.

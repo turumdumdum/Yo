@@ -29,8 +29,19 @@ export function App() {
           <section className="card auth-card" aria-labelledby="setup-heading">
             <h1 id="setup-heading">Setup required</h1>
             <p>
-              Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in <code>apps/web/.env</code>, then
-              restart the dev server. See <code>.env.example</code>.
+              The app was started without its Supabase settings. Missing:{' '}
+              {[
+                ['VITE_SUPABASE_URL', import.meta.env.VITE_SUPABASE_URL],
+                ['VITE_SUPABASE_ANON_KEY', import.meta.env.VITE_SUPABASE_ANON_KEY],
+              ]
+                .filter(([, value]) => !value)
+                .map(([name]) => name)
+                .join(', ')}
+              .
+            </p>
+            <p>
+              Put them in <code>apps/web/.env</code> (see <code>apps/web/.env.example</code>) and restart the dev server. The
+              terminal shows which file was read, in lines starting with <code>[env]</code>.
             </p>
           </section>
         )}
