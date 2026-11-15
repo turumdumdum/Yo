@@ -102,6 +102,53 @@ export async function listStages(supabase: SupabaseClient, requestId: string): P
   return data as StageRow[];
 }
 
+export interface InfoRequest {
+  id: string;
+  request_id: string;
+  stage_id: string;
+  question: string;
+  asked_by: string | null;
+  asked_at: string;
+  answer: string | null;
+  answered_at: string | null;
+}
+
+const INFO_COLUMNS = 'id,request_id,stage_id,question,asked_by,asked_at,answer,answered_at';
+
+export async function listInfoRequests(supabase: SupabaseClient, requestId: string): Promise<InfoRequest[]> {
+  const { data, error } = await supabase.from('info_requests').select(INFO_COLUMNS).eq('request_id', requestId).order('asked_at');
+  if (error) throw error;
+  return data as InfoRequest[];
+}
+
+export interface OpenQuestion {
+  id: string;
+  request_id: string;
+  question: string;
+  requests: { service_name: string | null; requester_id: string };
+}
+
+/** Unanswered questions on requests the caller can see. */
+export async function listOpenQuestions(supabase: SupabaseClient): Promise<OpenQuestion[]> {
+  const { data, error } = await supabase
+    .from('info_requests')
+    .select('id,request_id,question,requests(service_name,requester_id)')
+    .is('answered_at', null)
+    .order('asked_at');
+  if (error) throw error;
+  return data as unknown as OpenQuestion[];
+}
+
+export async function askRequester(supabase: SupabaseClient, stageId: string, question: string): Promise<void> {
+  const { error } = await supabase.rpc('ask_requester', { p_stage_id: stageId, p_question: question });
+  if (error) throw error;
+}
+
+export async function answerInfoRequest(supabase: SupabaseClient, id: string, answer: string): Promise<void> {
+  const { error } = await supabase.rpc('answer_info_request', { p_info_request_id: id, p_answer: answer });
+  if (error) throw error;
+}
+
 export interface QueueItem {
   id: string;
   request_id: string;

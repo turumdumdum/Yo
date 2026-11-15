@@ -6,7 +6,7 @@ import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import { Admin } from '../org/Admin';
 import { listMembers, type Member, type Membership } from '../org/api';
-import { createDraft, listRequests, loadRequest, type RequestRow, type RequestSummary } from './api';
+import { createDraft, listOpenQuestions, listRequests, loadRequest, type OpenQuestion, type RequestRow, type RequestSummary } from './api';
 import { RequestDetail } from './RequestDetail';
 import { RequestForm } from './RequestForm';
 import { ReviewQueue } from './ReviewQueue';
@@ -34,20 +34,27 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
   const [tab, setTab] = useState<Tab>('requests');
   const [requests, setRequests] = useState<RequestSummary[] | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  // Unanswered reviewer questions on my own requests.
+  const [myQuestions, setMyQuestions] = useState<OpenQuestion[]>([]);
   const [open, setOpen] = useState<{ request: RequestRow; stageId?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try {
-      const [rows, people] = await Promise.all([listRequests(supabase), listMembers(supabase, organization.id)]);
+      const [rows, people, questions] = await Promise.all([
+        listRequests(supabase),
+        listMembers(supabase, organization.id),
+        listOpenQuestions(supabase),
+      ]);
+      setMyQuestions(questions.filter((q) => q.requests.requester_id === user.id));
       setRequests(rows);
       setMembers(people);
       setError(null);
     } catch (e) {
       setError(errorMessage(e));
     }
-  }, [supabase, organization.id]);
+  }, [supabase, organization.id, user.id]);
 
   useEffect(() => {
     void reload();
@@ -143,6 +150,22 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
             await Promise.all([reload(), onOrganizationChanged()]);
           }}
         />
+      )}
+
+      {tab === 'requests' && myQuestions.length > 0 && (
+        <section className="action-required" aria-labelledby="action-list-heading">
+          <h2 id="action-list-heading">Action required from you</h2>
+          <p>Reviewers are waiting for your answer:</p>
+          <ul className="plain-list">
+            {[...new Map(myQuestions.map((q) => [q.request_id, q])).values()].map((q) => (
+              <li key={q.request_id}>
+                <button type="button" className="link-button" disabled={busy} onClick={() => void openRequest(q.request_id)}>
+                  {q.requests.service_name || 'Untitled request'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {tab === 'requests' && (

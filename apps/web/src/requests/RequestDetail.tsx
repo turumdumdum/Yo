@@ -5,7 +5,8 @@ import { RequestStatusBadge, RiskBadge } from '../components/Badge';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import { AnswerSummary } from './AnswerSummary';
-import { listStages, loadRequest, requestReviewAnswers, type RequestRow, type StageRow } from './api';
+import { listInfoRequests, listStages, loadRequest, requestReviewAnswers, type InfoRequest, type RequestRow, type StageRow } from './api';
+import { ActionRequired } from './Questions';
 import { StageList } from './StageList';
 import type { ReviewContext } from './StagePanel';
 
@@ -28,16 +29,19 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
   const [request, setRequest] = useState(initial);
   const [stages, setStages] = useState<StageRow[] | null>(null);
   const [reviewAnswers, setReviewAnswers] = useState<Record<string, Answers>>({});
+  const [questions, setQuestions] = useState<InfoRequest[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
       // The request itself too: the last stage decision changes its status.
-      const [fresh, rows, review] = await Promise.all([
+      const [fresh, rows, review, asked] = await Promise.all([
         loadRequest(supabase, initial.id),
         listStages(supabase, initial.id),
         requestReviewAnswers(supabase, initial.id),
+        listInfoRequests(supabase, initial.id),
       ]);
+      setQuestions(asked);
       if (fresh) setRequest(fresh);
       setStages(rows);
       setReviewAnswers(review);
@@ -52,6 +56,7 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
   }, [reload]);
 
   const requester = context.members.find((m) => m.user_id === request.requester_id)?.email;
+  const open = questions.filter((q) => q.answered_at === null);
 
   return (
     <div className="request-form">
@@ -74,6 +79,16 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
       {OUTCOME[request.status] && <p className={`notice notice-${request.status}`}>{OUTCOME[request.status]}</p>}
       <FormError message={error} />
 
+      {request.requester_id === context.userId && open.length > 0 && (
+        <ActionRequired
+          supabase={supabase}
+          questions={open}
+          stageName={(stageId) => stages?.find((st) => st.id === stageId)?.name ?? 'Review'}
+          nameOf={(userId) => context.members.find((m) => m.user_id === userId)?.email ?? 'A reviewer'}
+          onAnswered={reload}
+        />
+      )}
+
       {request.status !== 'draft' && (
         <section className="card" aria-labelledby="stages-heading">
           <h2 id="stages-heading">Review stages</h2>
@@ -83,6 +98,7 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
               stages={stages}
               answers={request.answers}
               reviewAnswers={reviewAnswers}
+              questions={questions}
               requesterId={request.requester_id}
               context={context}
               initialStageId={initialStageId}

@@ -5,7 +5,8 @@ import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import type { Member } from '../org/api';
 import { AnswerSummary } from './AnswerSummary';
-import { assignReviewer, decideStage, saveReviewAnswers, setChecklistItem, type StageRow } from './api';
+import { assignReviewer, decideStage, saveReviewAnswers, setChecklistItem, type InfoRequest, type StageRow } from './api';
+import { AskForm, QuestionThread } from './Questions';
 import { ReviewForm } from './ReviewForm';
 
 export interface ReviewContext {
@@ -22,6 +23,8 @@ interface Props {
   answers: Answers;
   /** This stage's review answers; undefined when the viewer may not see them. */
   reviewAnswers: Answers | undefined;
+  /** Questions to the requester asked in this stage. */
+  questions: InfoRequest[];
   requesterId: string;
   context: ReviewContext;
   /** Called after any change so the parent reloads the stages and the request. */
@@ -34,7 +37,7 @@ const REVIEWER_ROLES = new Set(['org_admin', 'process_manager', 'reviewer']);
 const formatDateTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
 /** Everything about one stage: who reviews it, the checklist, and the decision. */
-export function StagePanel({ supabase, stage, answers, reviewAnswers, requesterId, context, onChanged }: Props) {
+export function StagePanel({ supabase, stage, answers, reviewAnswers, questions, requesterId, context, onChanged }: Props) {
   const id = useId();
   const [comment, setComment] = useState('');
   const [conditions, setConditions] = useState('');
@@ -174,6 +177,14 @@ export function StagePanel({ supabase, stage, answers, reviewAnswers, requesterI
           <summary>Answers relevant to this review</summary>
           <AnswerSummary answers={answers} steps={focus} />
         </details>
+      )}
+
+      {(questions.length > 0 || canAct) && (
+        <div className="stage-questions">
+          {questions.length > 0 && <h3>Questions to the requester</h3>}
+          <QuestionThread questions={questions} nameOf={(userId) => nameOf(userId) ?? 'A former member'} />
+          {canAct && <AskForm supabase={supabase} stageId={stage.id} onAsked={onChanged} />}
+        </div>
       )}
 
       {hasForm && (canAct || reviewAnswers !== undefined) && (

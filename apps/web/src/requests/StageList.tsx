@@ -2,7 +2,7 @@ import type { Answers } from '@app/shared';
 import { useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { StatusBadge } from '../components/StatusBadge';
-import type { StageRow } from './api';
+import type { InfoRequest, StageRow } from './api';
 import { StagePanel, type ReviewContext } from './StagePanel';
 
 const DONE = new Set(['Approved', 'Approved with conditions', 'Rejected']);
@@ -23,6 +23,7 @@ interface Props {
   answers: Answers;
   /** Review answers by stage id, for viewers who may see them. */
   reviewAnswers: Record<string, Answers>;
+  questions: InfoRequest[];
   requesterId: string;
   context: ReviewContext;
   /** Stage to show expanded at first, for example when arriving from the review queue. */
@@ -31,7 +32,7 @@ interface Props {
 }
 
 /** Review stages of a submitted request, with progress, reviewer, SLA and the review itself. */
-export function StageList({ supabase, stages, answers, reviewAnswers, requesterId, context, initialStageId, onChanged }: Props) {
+export function StageList({ supabase, stages, answers, reviewAnswers, questions, requesterId, context, initialStageId, onChanged }: Props) {
   const [expanded, setExpanded] = useState<string | null>(initialStageId ?? null);
 
   if (stages.length === 0) {
@@ -87,6 +88,7 @@ export function StageList({ supabase, stages, answers, reviewAnswers, requesterI
                   stage={stage}
                   answers={answers}
                   reviewAnswers={reviewAnswers[stage.id]}
+                  questions={questions.filter((q) => q.stage_id === stage.id)}
                   requesterId={requesterId}
                   context={context}
                   onChanged={onChanged}

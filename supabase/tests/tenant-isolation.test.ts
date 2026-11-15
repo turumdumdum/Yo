@@ -7,7 +7,7 @@ import { asAnon, asUser, createUser, pool, resetDatabase } from './db';
 /** The organization column of a table, readable by every signed-in member. */
 const column = (table: string) => (table === 'organizations' ? 'id' : 'org_id');
 
-const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates'];
+const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests'];
 
 let adminA: string; // org admin of org A
 let requesterA: string; // requester in org A
@@ -64,6 +64,10 @@ beforeAll(async () => {
   await pool.query(
     `insert into public.request_stages (org_id, request_id, position, name, status)
      select r.org_id, r.id, 1, 'License check', 'In review' from public.requests r`,
+  );
+  await pool.query(
+    `insert into public.info_requests (org_id, request_id, stage_id, question)
+     select s.org_id, s.request_id, s.id, 'Which plan?' from public.request_stages s`,
   );
   await pool.query(
     `insert into public.review_templates (org_id, stage_name, fields) values ($1, 'Security review', '[]'), ($2, 'Security review', '[]')`,
