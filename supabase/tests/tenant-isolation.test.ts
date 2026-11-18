@@ -7,7 +7,7 @@ import { asAnon, asUser, createUser, pool, resetDatabase } from './db';
 /** The organization column of a table, readable by every signed-in member. */
 const column = (table: string) => (table === 'organizations' ? 'id' : 'org_id');
 
-const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments'];
+const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments', 'request_form_templates'];
 
 let adminA: string; // org admin of org A
 let requesterA: string; // requester in org A
@@ -68,6 +68,10 @@ beforeAll(async () => {
   await pool.query(
     `insert into public.info_requests (org_id, request_id, stage_id, question)
      select s.org_id, s.request_id, s.id, 'Which plan?' from public.request_stages s`,
+  );
+  await pool.query(
+    `insert into public.request_form_templates (org_id, name, definition) values ($1, 'Form', '{"steps": []}'), ($2, 'Form', '{"steps": []}')`,
+    [orgA, orgB],
   );
   await pool.query(
     `insert into public.attachments (org_id, request_id, kind, filename, content_type, size_bytes, storage_path, status)

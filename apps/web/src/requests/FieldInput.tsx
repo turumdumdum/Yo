@@ -154,7 +154,16 @@ export function FieldInput({ field, value, error, onChange, suggestion, onDismis
   const text = value === undefined || value === null ? '' : String(value);
   let control;
   if (field.type === 'textarea') {
-    control = <textarea {...common} rows={4} value={text} onChange={(e) => onChange(e.target.value)} />;
+    control = (
+      <textarea
+        {...common}
+        rows={4}
+        placeholder={field.placeholder}
+        maxLength={'maxLength' in field ? field.maxLength : undefined}
+        value={text}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
   } else if (field.type === 'select') {
     control = (
       <select {...common} value={text} onChange={(e) => onChange(e.target.value)}>
@@ -172,6 +181,7 @@ export function FieldInput({ field, value, error, onChange, suggestion, onDismis
         {...common}
         type="text"
         inputMode={field.type === 'integer' ? 'numeric' : 'decimal'}
+        placeholder={field.placeholder}
         value={text}
         onChange={(e) => {
           // Keep what was typed; store a number as soon as it is one.
@@ -187,8 +197,11 @@ export function FieldInput({ field, value, error, onChange, suggestion, onDismis
         {...common}
         // Not type="url": the browser would reject an address typed without https://.
         type={field.type === 'date' ? 'date' : 'text'}
-        inputMode={field.type === 'url' ? 'url' : undefined}
-        autoCapitalize={field.type === 'url' ? 'none' : undefined}
+        inputMode={field.type === 'url' ? 'url' : field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : undefined}
+        autoComplete={field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : undefined}
+        placeholder={field.placeholder}
+        maxLength={'maxLength' in field ? field.maxLength : undefined}
+        autoCapitalize={field.type === 'url' || field.type === 'email' ? 'none' : undefined}
         value={text}
         onChange={(e) => onChange(e.target.value)}
         onBlur={field.type === 'url' ? (e) => e.target.value.trim() !== '' && onChange(withHttps(e.target.value)) : undefined}

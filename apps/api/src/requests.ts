@@ -1,11 +1,14 @@
 import {
   computeRiskTier,
+  DEFAULT_REQUEST_FORM,
+  parseRequestForm,
   parseReviewTemplate,
   planStages,
   riskInputFromAnswers,
   validateAnswers,
   type Answers,
   type PlannedStage,
+  type RequestFormDefinition,
   type ReviewTemplate,
   type RiskResult,
 } from '@app/shared';
@@ -19,6 +22,8 @@ export interface DraftRecord {
   org_id: string;
   status: string;
   answers: Answers;
+  /** The form the draft was started with; null for the standard form. */
+  form?: unknown;
 }
 
 export interface SubmittedRecord {
@@ -46,6 +51,15 @@ export interface RequestStore {
   getReviewTemplates(orgId: string): Promise<Record<string, unknown>>;
   /** Marks a draft as submitted and starts its stages, atomically. Runs with backend privileges. */
   submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[]): Promise<SubmittedRecord>;
+}
+
+/** The form a draft was started with. A stored form that fails validation falls back to the standard one. */
+export function formOf(request: DraftRecord): RequestFormDefinition {
+  if (request.form === null || request.form === undefined) return DEFAULT_REQUEST_FORM;
+  const parsed = parseRequestForm(request.form);
+  if ('form' in parsed) return parsed.form;
+  console.warn(`Request ${request.id} has an invalid form (${parsed.error}); using the standard form`);
+  return DEFAULT_REQUEST_FORM;
 }
 
 /** The organization's valid review forms. A stored form that fails validation is skipped, so the default applies. */
@@ -82,7 +96,7 @@ export function requestRoutes(store: RequestStore) {
     if (!request) return c.json({ error: 'Not found' }, 404);
     if (request.status !== 'draft') return c.json({ error: 'This request has already been submitted' }, 409);
 
-    const { errors, cleaned } = validateAnswers(request.answers);
+    const { errors, cleaned } = validateAnswers(request.answers, undefined, formOf(request));
     if (Object.keys(errors).length > 0) {
       return c.json({ error: 'Some answers are missing or invalid', fields: errors }, 422);
     }

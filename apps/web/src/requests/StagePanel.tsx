@@ -1,4 +1,4 @@
-import { focusStepsForStage, validateReviewAnswers, type Answers, type StageDecision } from '@app/shared';
+import { focusFieldsForStage, validateReviewAnswers, type Answers, type RequestFormDefinition, type StageDecision } from '@app/shared';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
@@ -21,6 +21,8 @@ interface Props {
   supabase: SupabaseClient;
   stage: StageRow;
   answers: Answers;
+  /** The form the request was filled in with; null for the standard form. */
+  form: RequestFormDefinition | null;
   /** This stage's review answers; undefined when the viewer may not see them. */
   reviewAnswers: Answers | undefined;
   /** Questions to the requester asked in this stage. */
@@ -37,7 +39,7 @@ const REVIEWER_ROLES = new Set(['org_admin', 'process_manager', 'reviewer']);
 const formatDateTime = (iso: string) => new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
 /** Everything about one stage: who reviews it, the checklist, and the decision. */
-export function StagePanel({ supabase, stage, answers, reviewAnswers, questions, requesterId, context, onChanged }: Props) {
+export function StagePanel({ supabase, stage, answers, form, reviewAnswers, questions, requesterId, context, onChanged }: Props) {
   const id = useId();
   const [comment, setComment] = useState('');
   const [conditions, setConditions] = useState('');
@@ -91,7 +93,7 @@ export function StagePanel({ supabase, stage, answers, reviewAnswers, questions,
   const hasForm = stage.review_fields.length > 0;
   const missing = validateReviewAnswers(stage.review_fields, review, true);
   const formComplete = Object.keys(missing).length === 0;
-  const focus = focusStepsForStage(stage.name);
+  const focus = focusFieldsForStage(stage.name);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -175,7 +177,7 @@ export function StagePanel({ supabase, stage, answers, reviewAnswers, questions,
       {canAct && focus.length > 0 && (
         <details className="focus-answers" open>
           <summary>Answers relevant to this review</summary>
-          <AnswerSummary answers={answers} steps={focus} />
+          <AnswerSummary form={form} answers={answers} fields={focus} />
         </details>
       )}
 

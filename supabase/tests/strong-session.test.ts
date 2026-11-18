@@ -3,7 +3,7 @@ import { asSession, asUser, createUser, GOOGLE, PASSWORD_ONLY, PASSWORD_WITH_TOT
 
 // Mandatory MFA is enforced by RLS: email + password without TOTP gets nothing (CLAUDE.md §8).
 
-const TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments'];
+const TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments', 'request_form_templates'];
 
 let admin: string;
 let newcomer: string;
@@ -28,6 +28,7 @@ beforeAll(async () => {
     `insert into public.info_requests (org_id, request_id, stage_id, question)
      select s.org_id, s.request_id, s.id, 'Which plan?' from public.request_stages s`,
   );
+  await pool.query(`insert into public.request_form_templates (org_id, name, definition) values ($1, 'Form', '{"steps": []}')`, [org]);
   await pool.query(
     `insert into public.attachments (org_id, request_id, kind, filename, content_type, size_bytes, storage_path, status)
      select r.org_id, r.id, 'Quote', 'quote.pdf', 'application/pdf', 10, r.org_id || '/' || r.id || '/seed', 'uploaded'

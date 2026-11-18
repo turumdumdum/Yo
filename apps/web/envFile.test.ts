@@ -22,7 +22,7 @@ describe('readEnvDir', () => {
   it('reports a missing file and look-alikes without printing values', () => {
     dir = mkdtempSync(join(tmpdir(), 'env-'));
     writeFileSync(join(dir, '.env.txt'), 'VITE_SUPABASE_URL=https://secret.example');
-    const report = readEnvDir(dir);
+    const report = readEnvDir(dir, {});
     expect(report.values).toEqual({});
     expect(report.lines[0]).toMatch(/^No .env file in/);
     expect(report.lines.join('\n')).toMatch(/Ignored: .env.txt/);
@@ -34,7 +34,7 @@ describe('readEnvDir', () => {
     dir = mkdtempSync(join(tmpdir(), 'env-'));
     writeFileSync(join(dir, '.env'), '﻿VITE_SUPABASE_URL=https://a.supabase.co\nVITE_SUPABASE_ANON_KEY=k1');
     writeFileSync(join(dir, '.env.local'), 'VITE_SUPABASE_ANON_KEY=k2\nVITE_API_URL=http://localhost:8787');
-    const report = readEnvDir(dir);
+    const report = readEnvDir(dir, {});
     expect(report.values).toEqual({ VITE_SUPABASE_URL: 'https://a.supabase.co', VITE_SUPABASE_ANON_KEY: 'k2', VITE_API_URL: 'http://localhost:8787' });
     expect(report.lines.join('\n')).toMatch(/byte-order mark/);
     expect(report.lines.at(-1)).toBe('VITE_SUPABASE_URL: set · VITE_SUPABASE_ANON_KEY: set · VITE_API_URL: set');
@@ -50,7 +50,7 @@ describe('look-alike files', () => {
     writeFileSync(join(dir, 'envFile.ts'), '');
     writeFileSync(join(dir, '.env.example'), '');
     writeFileSync(join(dir, 'env'), '');
-    const lines = readEnvDir(dir).lines.join('\n');
+    const lines = readEnvDir(dir, {}).lines.join('\n');
     expect(lines).toMatch(/Ignored: env\./);
     expect(lines).not.toMatch(/envFile|\.env\.example/);
   });

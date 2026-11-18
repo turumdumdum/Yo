@@ -22,8 +22,12 @@ function envReport(): Plugin {
 export default defineConfig({
   envDir: here,
   plugins: [react(), envReport()],
-  // Vite would miss these in a file with a byte-order mark; pass them explicitly.
+  // Vite would miss these in a file with a byte-order mark; pass them explicitly. As in
+  // Vite itself, a value set in the environment wins over the file.
   define: Object.fromEntries(
-    REQUIRED_ENV.filter((key) => env.values[key]).map((key) => [`import.meta.env.${key}`, JSON.stringify(env.values[key])]),
+    REQUIRED_ENV.filter((key) => process.env[key] || env.values[key]).map((key) => [
+      `import.meta.env.${key}`,
+      JSON.stringify(process.env[key] || env.values[key]),
+    ]),
   ),
 });

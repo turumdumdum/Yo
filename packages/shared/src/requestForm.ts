@@ -9,9 +9,10 @@ import {
 } from './domain';
 import type { RiskInput } from './risk';
 
-// The 7-step request form (CLAUDE.md §5), described as data. The same definitions drive
-// the form UI, server-side validation and the answer summary, so a field is declared once.
-// File attachments (step 7) are not part of the form yet.
+// The request form (CLAUDE.md §5), described as data. The same definition drives the form
+// UI, server-side validation and the answer summary, so a field is declared once.
+// Organizations can replace the standard form with their own (see requestFormEditor.ts);
+// every function here therefore takes the form it works on, defaulting to the standard one.
 
 export type Answers = Record<string, unknown>;
 
@@ -29,7 +30,10 @@ export interface OwnerValue {
 interface FieldBase {
   key: string;
   label: string;
+  /** Help text shown under the label. */
   hint?: string;
+  /** Example shown inside an empty input. */
+  placeholder?: string;
   optional?: boolean;
   /** The field is shown, validated and stored only when another answer has one of these values. */
   showWhen?: { field: string; in: readonly string[] };
@@ -37,16 +41,24 @@ interface FieldBase {
 
 export type FieldDef = FieldBase &
   (
-    | { type: 'text' | 'textarea' | 'url' | 'date' }
-    | { type: 'integer' | 'money'; min: number }
+    | { type: 'text' | 'textarea' | 'url' | 'email' | 'phone' | 'date'; maxLength?: number }
+    | { type: 'integer' | 'money'; min: number; max?: number }
     | { type: 'select' | 'radio'; options: readonly Option[] }
     | { type: 'multiselect'; options: readonly Option[] }
     | { type: 'owner' }
   );
 
+export type FieldType = FieldDef['type'];
+
 export interface StepDef {
   title: string;
+  /** Short explanation shown at the top of the step. */
+  description?: string;
   fields: readonly FieldDef[];
+}
+
+export interface RequestFormDefinition {
+  steps: readonly StepDef[];
 }
 
 const options = (values: readonly string[]): Option[] => values.map((value) => ({ value, label: value }));
@@ -98,10 +110,11 @@ const whenPaid = { field: 'paymentType', in: ['Paid'] } as const;
 export const REQUEST_FORM_STEPS: readonly StepDef[] = [
   {
     title: 'What do you need?',
+    description: 'Tell us which service you want and why. Reviewers read this first.',
     fields: [
-      { key: 'serviceName', label: 'Service name', type: 'text' },
-      { key: 'vendorName', label: 'Vendor', type: 'text' },
-      { key: 'vendorWebsite', label: 'Vendor website', type: 'url', hint: 'For example vendor.example. https:// is added for you.' },
+      { key: 'serviceName', label: 'Service name', type: 'text', placeholder: 'For example Figma' },
+      { key: 'vendorName', label: 'Vendor', type: 'text', hint: 'The company that sells the service.', placeholder: 'For example Figma, Inc.' },
+      { key: 'vendorWebsite', label: 'Vendor website', type: 'url', hint: 'https:// is added for you.', placeholder: 'vendor.com' },
       { key: 'requestType', label: 'Request type', type: 'radio', options: options(REQUEST_TYPES) },
       { key: 'category', label: 'Category', type: 'select', options: options(CATEGORIES) },
       { key: 'purpose', label: 'Purpose of use', type: 'textarea', hint: 'What will the service be used for, and by whom?' },
@@ -111,6 +124,7 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
   },
   {
     title: 'Entities & geography',
+    description: 'Which companies sign the contract and where the service will be used.',
     fields: [
       { key: 'countryOfUse', label: 'Country of use', type: 'select', options: COUNTRY_OPTIONS },
       { key: 'ourLegalEntity', label: 'Our legal entity', type: 'text', hint: 'The company that will sign the contract.' },
@@ -120,6 +134,7 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
   },
   {
     title: 'Access & platform',
+    description: 'How people will sign in and what the service connects to.',
     fields: [
       { key: 'signInMethod', label: 'Sign-in method', type: 'radio', options: options(SIGN_IN_METHODS) },
       { key: 'platforms', label: 'Planned platform', type: 'multiselect', options: options(PLATFORMS) },
@@ -143,6 +158,7 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
   },
   {
     title: 'Data',
+    description: 'What data the vendor will see. If unsure, choose the higher classification.',
     fields: [
       { key: 'dataClassification', label: 'Data classification', type: 'radio', options: options(DATA_CLASSIFICATIONS) },
       {
@@ -165,6 +181,7 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
   },
   {
     title: 'Commercials',
+    description: 'What it costs and how the contract runs.',
     fields: [
       { key: 'paymentType', label: 'Paid or free', type: 'radio', options: options(PAYMENT_TYPES) },
       { key: 'annualCost', label: 'Estimated annual cost', type: 'money', min: 0, showWhen: whenPaid },
@@ -176,6 +193,7 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
   },
   {
     title: 'Ownership',
+    description: 'Who is responsible for this service. Choose “Not required” where a role does not apply.',
     fields: [
       { key: 'budgetOwner', label: 'Budget owner', type: 'owner' },
       { key: 'businessOwner', label: 'Business owner', type: 'owner' },
@@ -185,6 +203,7 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
   },
   {
     title: 'Review',
+    description: 'How important the service is, files for reviewers, and a last check of your answers.',
     fields: [
       {
         key: 'businessCriticality',
@@ -197,31 +216,56 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
   },
 ];
 
+/** The standard form every organization starts with. */
+export const DEFAULT_REQUEST_FORM: RequestFormDefinition = { steps: REQUEST_FORM_STEPS };
+
+/**
+ * Fields the product relies on: the request title, triage (risk tier), stage rules and
+ * reports. A custom form must keep them with the same type and choices; their wording,
+ * help text, step and position can change.
+ */
+export const SYSTEM_FIELD_KEYS = [
+  'serviceName',
+  'vendorName',
+  'requestType',
+  'dataClassification',
+  'productionAccess',
+  'paymentType',
+  'annualCost',
+  'businessCriticality',
+] as const;
+
 const TEXT_MAX = 200;
 const TEXTAREA_MAX = 2000;
 /** Values above this are almost certainly typing mistakes. */
 const NUMBER_MAX = 1_000_000_000_000;
 
-function isVisible(field: FieldDef, answers: Answers): boolean {
-  if (!field.showWhen) return true;
-  const controller = findField(field.showWhen.field);
-  // A field controlled by a hidden field is hidden too.
-  if (controller && !isVisible(controller, answers)) return false;
-  const value = answers[field.showWhen.field];
-  return typeof value === 'string' && field.showWhen.in.includes(value);
+/** Every field of a form, in display order. */
+export function allFields(form: RequestFormDefinition = DEFAULT_REQUEST_FORM): FieldDef[] {
+  return form.steps.flatMap((step) => [...step.fields]);
 }
 
-function findField(key: string): FieldDef | undefined {
-  for (const step of REQUEST_FORM_STEPS) {
+function findField(key: string, form: RequestFormDefinition): FieldDef | undefined {
+  for (const step of form.steps) {
     const field = step.fields.find((f) => f.key === key);
     if (field) return field;
   }
   return undefined;
 }
 
+function isVisible(field: FieldDef, answers: Answers, form: RequestFormDefinition, depth = 0): boolean {
+  if (!field.showWhen) return true;
+  const controller = findField(field.showWhen.field, form);
+  // A field controlled by a hidden field is hidden too. The depth guard protects against
+  // stored forms with a cycle; the form validator refuses those.
+  if (controller && (depth > 20 || !isVisible(controller, answers, form, depth + 1))) return false;
+  const value = answers[field.showWhen.field];
+  return typeof value === 'string' && field.showWhen.in.includes(value);
+}
+
 /** Fields of a step that apply to the given answers, in display order. */
-export function visibleFields(stepIndex: number, answers: Answers): FieldDef[] {
-  return (REQUEST_FORM_STEPS[stepIndex]?.fields ?? []).filter((f) => isVisible(f, answers));
+export function visibleFields(stepIndex: number, answers: Answers, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): FieldDef[] {
+  return (form.steps[stepIndex]?.fields ?? []).filter((f) => isVisible(f, answers, form));
 }
 
 /** Adds https:// to a web address that has no scheme: "acme.example" becomes "https://acme.example". */
@@ -238,12 +282,20 @@ function checkField(field: FieldDef, raw: unknown): Checked {
     case 'text':
     case 'textarea':
     case 'url':
+    case 'email':
+    case 'phone':
     case 'date': {
       if (typeof raw !== 'string' || raw.trim() === '') return { empty: true };
       // A web address typed without a scheme gets https://.
-      const value = field.type === 'url' ? withHttps(raw) : raw.trim();
-      const max = field.type === 'textarea' ? TEXTAREA_MAX : TEXT_MAX;
+      const value = field.type === 'url' ? withHttps(raw) : field.type === 'email' ? raw.trim().toLowerCase() : raw.trim();
+      const max = Math.min(field.maxLength ?? Infinity, field.type === 'textarea' ? TEXTAREA_MAX : TEXT_MAX);
       if (value.length > max) return { error: `Use at most ${max} characters` };
+      if (field.type === 'email' && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+        return { error: 'Enter an email address such as name@company.com' };
+      }
+      if (field.type === 'phone' && !/^\+?[0-9][0-9 ()./-]{5,24}$/.test(value)) {
+        return { error: 'Enter a phone number such as +372 5555 1234' };
+      }
       if (field.type === 'url') {
         // No URL global here: this package is built without DOM or Node typings.
         if (!/^https?:\/\/[a-z0-9-]+(\.[a-z0-9-]+)+([/:?#]\S*)?$/i.test(value)) {
@@ -263,6 +315,7 @@ function checkField(field: FieldDef, raw: unknown): Checked {
       if (!Number.isFinite(value)) return { error: 'Enter a number' };
       if (field.type === 'integer' && !Number.isInteger(value)) return { error: 'Enter a whole number' };
       if (value < field.min) return { error: `Enter ${field.min} or more` };
+      if (field.max !== undefined && value > field.max) return { error: `Enter ${field.max} or less` };
       if (value > NUMBER_MAX) return { error: 'This number is too large' };
       return { value };
     }
@@ -315,12 +368,16 @@ export interface ValidationResult {
 }
 
 /** Validates every visible field of the given steps (all steps by default). */
-export function validateAnswers(answers: Answers, stepIndexes?: readonly number[]): ValidationResult {
+export function validateAnswers(
+  answers: Answers,
+  stepIndexes?: readonly number[],
+  form: RequestFormDefinition = DEFAULT_REQUEST_FORM,
+): ValidationResult {
   const errors: Record<string, string> = {};
   const cleaned: Answers = {};
-  const steps = stepIndexes ?? REQUEST_FORM_STEPS.map((_, i) => i);
+  const steps = stepIndexes ?? form.steps.map((_, i) => i);
   for (const stepIndex of steps) {
-    for (const field of visibleFields(stepIndex, answers)) {
+    for (const field of visibleFields(stepIndex, answers, form)) {
       const checked = checkField(field, answers[field.key]);
       if ('error' in checked) errors[field.key] = checked.error;
       else if ('empty' in checked) {
@@ -333,23 +390,28 @@ export function validateAnswers(answers: Answers, stepIndexes?: readonly number[
 
 /**
  * Normalizes one proposed value for a field (for example an AI suggestion).
- * Returns undefined when the field is unknown or the value is not acceptable.
+ * Returns undefined when the form has no such field or the value is not acceptable.
  */
-export function normalizeAnswer(key: string, raw: unknown): unknown {
-  const field = findField(key);
+export function normalizeAnswer(key: string, raw: unknown, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): unknown {
+  const field = findField(key, form);
   if (!field) return undefined;
   const checked = checkField(field, raw);
   return 'value' in checked ? checked.value : undefined;
 }
 
 /** Label of a form field, or undefined for an unknown key. */
-export function fieldLabel(key: string): string | undefined {
-  return findField(key)?.label;
+export function fieldLabel(key: string, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): string | undefined {
+  return findField(key, form)?.label;
+}
+
+/** Index of the step a field is on, or -1. */
+export function stepOfField(key: string, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): number {
+  return form.steps.findIndex((step) => step.fields.some((f) => f.key === key));
 }
 
 /** Index of the first step that has a validation error, or -1. */
-export function firstStepWithErrors(errors: Record<string, string>): number {
-  return REQUEST_FORM_STEPS.findIndex((step) => step.fields.some((f) => f.key in errors));
+export function firstStepWithErrors(errors: Record<string, string>, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): number {
+  return form.steps.findIndex((step) => step.fields.some((f) => f.key in errors));
 }
 
 /** Text shown for an answer in summaries. */

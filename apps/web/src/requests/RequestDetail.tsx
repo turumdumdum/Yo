@@ -8,6 +8,7 @@ import { AnswerSummary } from './AnswerSummary';
 import { Attachments } from './Attachments';
 import { listInfoRequests, listStages, loadRequest, requestReviewAnswers, type InfoRequest, type RequestRow, type StageRow } from './api';
 import { ActionRequired } from './Questions';
+import { RequestProgress } from './RequestProgress';
 import { StageList } from './StageList';
 import type { ReviewContext } from './StagePanel';
 
@@ -21,10 +22,6 @@ interface Props {
   onClose: () => void;
 }
 
-const OUTCOME: Record<string, string> = {
-  approved: 'All required stages are complete and the request is approved.',
-  rejected: 'The request was rejected. See the stage decisions below for the reasons.',
-};
 
 export function RequestDetail({ supabase, request: initial, context, initialStageId, onClose }: Props) {
   const [request, setRequest] = useState(initial);
@@ -77,7 +74,9 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
           {requester ? ` by ${requester}` : ''}.
         </p>
       )}
-      {OUTCOME[request.status] && <p className={`notice notice-${request.status}`}>{OUTCOME[request.status]}</p>}
+      {request.status !== 'draft' && (
+        <RequestProgress request={request} stages={stages} questions={questions} isRequester={request.requester_id === context.userId} />
+      )}
       <FormError message={error} />
 
       {request.requester_id === context.userId && open.length > 0 && (
@@ -92,12 +91,13 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
 
       {request.status !== 'draft' && (
         <section className="card" aria-labelledby="stages-heading">
-          <h2 id="stages-heading">Review stages</h2>
+          <h2 id="stages-heading">Checks</h2>
           {stages ? (
             <StageList
               supabase={supabase}
               stages={stages}
               answers={request.answers}
+              form={request.form}
               reviewAnswers={reviewAnswers}
               questions={questions}
               requesterId={request.requester_id}
@@ -147,7 +147,7 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
 
       <section className="card" aria-labelledby="details-heading">
         <h2 id="details-heading">Request details</h2>
-        <AnswerSummary answers={request.answers} />
+        <AnswerSummary form={request.form} answers={request.answers} />
       </section>
     </div>
   );

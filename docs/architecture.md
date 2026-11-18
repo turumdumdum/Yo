@@ -16,6 +16,17 @@ The decisions behind this layout are in [CLAUDE.md](../CLAUDE.md) §3 and §8. T
 - An organization is created through the `public.create_organization` RPC, which also makes the caller the first org admin.
 - `audit_log` is append-only: triggers reject update, delete and truncate for every role, and the browser has no insert privilege. Membership changes are written to it by a trigger.
 
+## Request forms
+
+- The standard form is `DEFAULT_REQUEST_FORM` in `packages/shared/src/requestForm.ts`. Every function that renders or validates answers takes the form as a parameter, so a custom form drives the UI, the server-side validation, the summary and the AI assistant alike.
+- Organizations keep saved forms in `request_form_templates` and mark at most one as active. A trigger copies the active form into `requests.form` when a draft is created (null means the standard form); the browser cannot set or change that column. Editing or deleting a saved form therefore never changes a request already started.
+- Saved forms are written through `POST/PUT/DELETE /v1/request-forms` and `POST /v1/request-forms/:id/activate` (`standard` returns to the built-in form). The API checks that the caller is an org admin or process manager and validates the form with `parseRequestForm`; every change is audited.
+- **System fields** (`SYSTEM_FIELD_KEYS`) are what triage and the product rely on: service name, vendor, request type, data classification, production access, paid or free, annual cost and business criticality. A custom form must keep them with their type, choices and conditions; wording, help text, step and position can change. Other standard questions can be removed, and new ones added: short or long text, email, phone, web address, date, whole number, amount, one choice (buttons or list), several choices, person.
+- A question can be shown only when an earlier one-choice question has certain answers. Conditions may only point backwards, which rules out cycles.
+- Keys of questions added in the editor are derived from their labels when the form is saved; keys of existing questions never change, because stored answers refer to them.
+- Reviewers' "relevant answers" are chosen by field key (`focusFields` in the workflow), so they keep working when a custom form moves questions between steps.
+- If a stored form somehow fails validation, the API falls back to the standard form for that request and logs a warning.
+
 ## Requests
 
 - The form is declared once in `packages/shared/src/requestForm.ts` as data (steps, fields, `showWhen` conditions). The web app renders it, and the API validates with the same definitions.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { REQUEST_FORM_STEPS } from './requestForm';
-import { addBusinessDays, DEFAULT_WORKFLOW, focusStepsForStage, planStages, type WorkflowConfig } from './workflow';
+import { allFields } from './requestForm';
+import { addBusinessDays, DEFAULT_WORKFLOW, focusFieldsForStage, planStages, type WorkflowConfig } from './workflow';
 
 // 2026-11-13 is a Friday.
 const friday = new Date('2026-11-13T15:30:00Z');
@@ -75,9 +75,9 @@ describe('planStages (custom workflow)', () => {
   it('follows organization-specific stages, tiers and deadlines without code changes', () => {
     const config: WorkflowConfig = {
       stages: [
-        { name: 'Procurement', minTier: 'Low', slaBusinessDays: 2, checklist: ['Three quotes collected'], focusSteps: [4] },
-        { name: 'Privacy review', minTier: 'Low', onlyWhen: { field: 'personalData', label: 'Personal data', in: ['Yes'] }, slaBusinessDays: 10, checklist: [], focusSteps: [] },
-        { name: 'Board approval', minTier: 'Critical', slaBusinessDays: 20, checklist: [], focusSteps: [] },
+        { name: 'Procurement', minTier: 'Low', slaBusinessDays: 2, checklist: ['Three quotes collected'], focusFields: ['annualCost'] },
+        { name: 'Privacy review', minTier: 'Low', onlyWhen: { field: 'personalData', label: 'Personal data', in: ['Yes'] }, slaBusinessDays: 10, checklist: [], focusFields: [] },
+        { name: 'Board approval', minTier: 'Critical', slaBusinessDays: 20, checklist: [], focusFields: [] },
       ],
     };
     const stages = planStages('High', { personalData: 'Yes' }, friday, config);
@@ -106,13 +106,14 @@ describe('planStages (custom workflow)', () => {
     expect(planStages('Low', {}, friday).find((s) => s.name === 'Security review')!.reviewFields).toEqual([]);
   });
 
-  it('points each default stage at existing form steps', () => {
+  it('points each default stage at existing form fields', () => {
+    const keys = new Set(allFields().map((f) => f.key));
     for (const rule of DEFAULT_WORKFLOW.stages) {
-      expect(rule.focusSteps.length).toBeGreaterThan(0);
-      for (const index of rule.focusSteps) expect(REQUEST_FORM_STEPS[index]).toBeDefined();
+      expect(rule.focusFields.length).toBeGreaterThan(0);
+      for (const key of rule.focusFields) expect(keys.has(key)).toBe(true);
     }
-    expect(focusStepsForStage('Finance review')).toEqual([4, 5]);
-    expect(focusStepsForStage('Something custom')).toEqual([]);
+    expect(focusFieldsForStage('Finance review')).toContain('annualCost');
+    expect(focusFieldsForStage('Something custom')).toEqual([]);
   });
 
   it('exposes the default configuration as plain data', () => {

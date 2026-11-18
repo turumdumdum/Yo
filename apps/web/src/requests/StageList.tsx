@@ -1,4 +1,4 @@
-import type { Answers } from '@app/shared';
+import type { Answers, RequestFormDefinition } from '@app/shared';
 import { useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { StatusBadge } from '../components/StatusBadge';
@@ -21,6 +21,7 @@ interface Props {
   supabase: SupabaseClient;
   stages: StageRow[];
   answers: Answers;
+  form: RequestFormDefinition | null;
   /** Review answers by stage id, for viewers who may see them. */
   reviewAnswers: Record<string, Answers>;
   questions: InfoRequest[];
@@ -32,7 +33,7 @@ interface Props {
 }
 
 /** Review stages of a submitted request, with progress, reviewer, SLA and the review itself. */
-export function StageList({ supabase, stages, answers, reviewAnswers, questions, requesterId, context, initialStageId, onChanged }: Props) {
+export function StageList({ supabase, stages, answers, form, reviewAnswers, questions, requesterId, context, initialStageId, onChanged }: Props) {
   const [expanded, setExpanded] = useState<string | null>(initialStageId ?? null);
 
   if (stages.length === 0) {
@@ -47,7 +48,7 @@ export function StageList({ supabase, stages, answers, reviewAnswers, questions,
   return (
     <>
       <p className="progress-text">
-        {done} of {required.length} required stages completed
+        {done} of {required.length} checks done
       </p>
       <progress className="progress-line" max={required.length} value={done} aria-label="Review progress" />
       <ul className="stage-list">
@@ -87,6 +88,7 @@ export function StageList({ supabase, stages, answers, reviewAnswers, questions,
                   supabase={supabase}
                   stage={stage}
                   answers={answers}
+                  form={form}
                   reviewAnswers={reviewAnswers[stage.id]}
                   questions={questions.filter((q) => q.stage_id === stage.id)}
                   requesterId={requesterId}

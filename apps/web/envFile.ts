@@ -30,7 +30,7 @@ export interface EnvReport {
 }
 
 /** Values from .env and .env.local in `dir` (later files win), and lines describing them. */
-export function readEnvDir(dir: string): EnvReport {
+export function readEnvDir(dir: string, environment: Record<string, string | undefined> = process.env): EnvReport {
   const values: Record<string, string> = {};
   const lines: string[] = [];
   const read: string[] = [];
@@ -51,6 +51,8 @@ export function readEnvDir(dir: string): EnvReport {
   }
 
   // Values are never printed; only whether each one is there.
-  lines.push(REQUIRED_ENV.map((key) => `${key}: ${values[key] ? 'set' : 'MISSING'}`).join(' · '));
+  lines.push(
+    REQUIRED_ENV.map((key) => `${key}: ${environment[key] ? 'set in the environment' : values[key] ? 'set' : 'MISSING'}`).join(' · '),
+  );
   return { values, lines };
 }

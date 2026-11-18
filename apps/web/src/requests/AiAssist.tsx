@@ -1,12 +1,10 @@
-import { fieldLabel, formatAnswer, REQUEST_FORM_STEPS, type AiRemark, type AiSuggestion, type Answers } from '@app/shared';
+import { allFields, fieldLabel, formatAnswer, stepOfField, type AiRemark, type AiSuggestion, type Answers, type RequestFormDefinition } from '@app/shared';
 import { useEffect, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import { aiCheck, aiSuggestions } from './api';
 
-const FIELDS = new Map(REQUEST_FORM_STEPS.flatMap((s) => s.fields).map((f) => [f.key, f]));
-const STEP_OF = new Map(REQUEST_FORM_STEPS.flatMap((s, i) => s.fields.map((f) => [f.key, i] as const)));
 
 interface Props {
   supabase: SupabaseClient;
@@ -14,6 +12,7 @@ interface Props {
   /** Name of the AI provider, shown so people know where their data goes. */
   provider: string;
   mode: 'suggest' | 'check';
+  form: RequestFormDefinition;
   answers: Answers;
   /** Stores the latest answers; the AI reads the saved draft. Resolves to false when saving failed. */
   save: () => Promise<boolean>;
@@ -26,7 +25,8 @@ interface Props {
  * Optional AI help inside the request form. Suggestions are labelled "Suggested" and
  * change nothing until the requester applies them; remarks never block submission.
  */
-export function AiAssist({ supabase, requestId, provider, mode, answers, save, onApply, onSuggestions }: Props) {
+export function AiAssist({ supabase, requestId, provider, mode, form, answers, save, onApply, onSuggestions }: Props) {
+  const FIELDS = new Map(allFields(form).map((f) => [f.key, f]));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<AiSuggestion[] | null>(null);
@@ -83,7 +83,7 @@ export function AiAssist({ supabase, requestId, provider, mode, answers, save, o
         {onSuggestions && suggestions && suggestions.length > 0 && (
           <p className="empty">
             {suggestions.length} {suggestions.length === 1 ? 'suggestion is' : 'suggestions are'} shown under the fields
-            {suggestions.some((sg) => STEP_OF.get(sg.field) === 1) ? ', on this step and on “Entities & geography”' : ''}. Use
+            {suggestions.some((sg) => stepOfField(sg.field, form) > 0) ? ', on this step and on later steps' : ''}. Use
             one to fill the field, edit it as you like, or type your own answer.
           </p>
         )}
@@ -151,7 +151,7 @@ export function AiAssist({ supabase, requestId, provider, mode, answers, save, o
             <li key={i}>
               <p>
                 <span className="suggested-tag">{r.severity === 'warning' ? 'AI warning' : 'AI tip'}</span>{' '}
-                {r.field && <strong>{fieldLabel(r.field)}: </strong>}
+                {r.field && <strong>{fieldLabel(r.field, form)}: </strong>}
                 {r.message}
               </p>
             </li>

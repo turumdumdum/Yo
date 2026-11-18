@@ -1,12 +1,22 @@
 import { ORG_ROLE_LABELS } from '@app/shared';
 import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
-import { RequestStatusBadge, RiskBadge } from '../components/Badge';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import { Admin } from '../org/Admin';
 import { listMembers, type Member, type Membership } from '../org/api';
-import { createDraft, listOpenQuestions, listRequests, loadRequest, type OpenQuestion, type RequestRow, type RequestSummary } from './api';
+import {
+  createDraft,
+  listOpenQuestions,
+  listOpenStages,
+  listRequests,
+  loadRequest,
+  type OpenQuestion,
+  type RequestRow,
+  type RequestSummary,
+} from './api';
+import { HowItWorks } from './HowItWorks';
+import { RequestList } from './RequestList';
 import { RequestDetail } from './RequestDetail';
 import { RequestForm } from './RequestForm';
 import { ReviewQueue } from './ReviewQueue';
@@ -22,8 +32,6 @@ interface Props {
 
 type Tab = 'requests' | 'reviews' | 'admin';
 
-const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { dateStyle: 'medium' });
-
 export function Workspace({ supabase, user, membership, onOrganizationChanged }: Props) {
   const { role, organization } = membership;
   const isManager = role === 'org_admin' || role === 'process_manager';
@@ -36,17 +44,28 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
   const [members, setMembers] = useState<Member[]>([]);
   // Unanswered reviewer questions on my own requests.
   const [myQuestions, setMyQuestions] = useState<OpenQuestion[]>([]);
+  // Open review stages waiting for this person, for the count on the tab.
+  const [toReview, setToReview] = useState(0);
   const [open, setOpen] = useState<{ request: RequestRow; stageId?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try {
-      const [rows, people, questions] = await Promise.all([
+      const [rows, people, questions, stages] = await Promise.all([
         listRequests(supabase),
         listMembers(supabase, organization.id),
         listOpenQuestions(supabase),
+        canReview ? listOpenStages(supabase) : Promise.resolve([]),
       ]);
+      // Same rule as the review queue: assigned to me, or unassigned for managers; not my own requests.
+      setToReview(
+        stages.filter(
+          (st) =>
+            (st.reviewer_id === user.id || (isManager && st.reviewer_id === null)) &&
+            (organization.allow_self_review || st.requests.requester_id !== user.id),
+        ).length,
+      );
       setMyQuestions(questions.filter((q) => q.requests.requester_id === user.id));
       setRequests(rows);
       setMembers(people);
@@ -54,7 +73,7 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
     } catch (e) {
       setError(errorMessage(e));
     }
-  }, [supabase, organization.id, user.id]);
+  }, [supabase, organization.id, organization.allow_self_review, user.id, canReview, isManager]);
 
   useEffect(() => {
     void reload();
@@ -99,6 +118,7 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
         requestId={open.request.id}
         userId={user.id}
         initialAnswers={open.request.answers}
+        form={open.request.form}
         onSubmitted={() => void openRequest(open.request.id)}
         onClose={close}
       />
@@ -117,11 +137,13 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
     );
   }
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'requests', label: 'Requests' },
-    ...(canReview ? [{ id: 'reviews' as const, label: 'To review' }] : []),
+  const tabs: { id: Tab; label: string; count?: number }[] = [
+    { id: 'requests', label: 'Requests', count: myQuestions.length || undefined },
+    ...(canReview ? [{ id: 'reviews' as const, label: 'To review', count: toReview || undefined }] : []),
     ...(role === 'org_admin' ? [{ id: 'admin' as const, label: 'Admin' }] : []),
   ];
+  const awaitingMyAnswer = new Set(myQuestions.map((q) => q.request_id));
+  const nameOf = (userId: string) => members.find((m) => m.user_id === userId)?.email ?? 'a former member';
 
   return (
     <>
@@ -133,13 +155,20 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
           {tabs.map((t) => (
             <button key={t.id} type="button" aria-current={tab === t.id ? 'page' : undefined} onClick={() => setTab(t.id)}>
               {t.label}
+              {t.count !== undefined && (
+                <span className="tab-count" aria-label={`, ${t.count} waiting`}>
+                  {t.count}
+                </span>
+              )}
             </button>
           ))}
         </nav>
       )}
       <FormError message={error} />
 
-      {tab === 'reviews' && <ReviewQueue supabase={supabase} context={context} onOpen={(id, stageId) => void openRequest(id, stageId)} />}
+      {tab === 'reviews' && (
+        <ReviewQueue supabase={supabase} context={context} onOpen={(id, stageId) => void openRequest(id, stageId)} />
+      )}
 
       {tab === 'admin' && (
         <Admin
@@ -172,41 +201,38 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
       {tab === 'requests' && (
         <section className="card" aria-labelledby="requests-heading">
           <div className="card-head">
-            <h2 id="requests-heading">Requests</h2>
-            {canCreate && (
+            <h2 id="requests-heading">{isManager || role === 'auditor' ? 'Requests' : 'Your requests'}</h2>
+            {canCreate && requests !== null && requests.length > 0 && (
               <button type="button" className="button" disabled={busy} onClick={() => void startRequest()}>
-                New request
+                + New request
               </button>
             )}
           </div>
           {requests === null ? (
             <p role="status">Loading…</p>
           ) : requests.length === 0 ? (
-            <p className="empty">No requests yet.{canCreate && ' Start one with “New request”.'}</p>
+            <div className="empty-state">
+              <p>{canCreate ? 'You have no requests yet.' : 'There are no requests to look at yet.'}</p>
+              {canCreate && (
+                <button type="button" className="button button-large" disabled={busy} onClick={() => void startRequest()}>
+                  Start a new request
+                </button>
+              )}
+            </div>
           ) : (
-            <ul className="request-list">
-              {requests.map((request) => (
-                <li key={request.id}>
-                  <button type="button" className="request-row" disabled={busy} onClick={() => void openRequest(request.id)}>
-                    <span className="request-title">{request.service_name || 'Untitled request'}</span>
-                    <span className="request-meta">
-                      {request.request_type ? `${request.request_type} · ` : ''}
-                      {request.status === 'draft'
-                        ? `Edited ${formatDate(request.updated_at)}`
-                        : `Submitted ${formatDate(request.submitted_at ?? request.updated_at)}`}
-                      {request.requester_id === user.id ? ' · by you' : ''}
-                    </span>
-                    <span className="badges">
-                      <RequestStatusBadge status={request.status} />
-                      {request.risk_tier && <RiskBadge tier={request.risk_tier} />}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <RequestList
+              requests={requests}
+              userId={user.id}
+              awaitingMyAnswer={awaitingMyAnswer}
+              nameOf={nameOf}
+              busy={busy}
+              onOpen={(id) => void openRequest(id)}
+            />
           )}
         </section>
       )}
+
+      {tab === 'requests' && requests !== null && <HowItWorks compact={requests.length > 0} />}
     </>
   );
 }

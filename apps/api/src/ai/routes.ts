@@ -1,6 +1,6 @@
 import type { AiStatus } from '@app/shared';
 import { Hono, type Context } from 'hono';
-import { UnauthorizedError, type DraftRecord, type RequestStore } from '../requests';
+import { formOf, UnauthorizedError, type DraftRecord, type RequestStore } from '../requests';
 import { answerCheckTask, remarksFromResult, suggestionsFromResult, vendorLookupTask } from './assist';
 import { AiProviderError, type AiProvider, type AiTask } from './provider';
 
@@ -69,7 +69,7 @@ export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) 
     if (!task) return c.json({ error: 'Enter the service name or the vendor first' }, 422);
     const limited = throttled(c, request.id);
     if (limited) return limited;
-    return run(c, task, (result) => ({ suggestions: suggestionsFromResult(result, request.answers) }));
+    return run(c, task, (result) => ({ suggestions: suggestionsFromResult(result, request.answers, formOf(request)) }));
   });
 
   routes.post('/requests/:id/ai/check', async (c) => {
@@ -77,7 +77,8 @@ export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) 
     if (request instanceof Response) return request;
     const limited = throttled(c, request.id);
     if (limited) return limited;
-    return run(c, answerCheckTask(request.answers), (result) => ({ remarks: remarksFromResult(result) }));
+    const form = formOf(request);
+    return run(c, answerCheckTask(request.answers, form), (result) => ({ remarks: remarksFromResult(result, form) }));
   });
 
   return routes;

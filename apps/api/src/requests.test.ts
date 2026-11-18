@@ -120,6 +120,41 @@ describe('POST /v1/requests/:id/submit', () => {
     expect(calls[1]!.stages.find((s) => s.name === 'Security review')!.reviewFields.map((f) => f.key)).toContain('certifications');
   });
 
+  it("validates against the form the draft was started with", async () => {
+    const custom = {
+      steps: [
+        {
+          title: 'Basics',
+          fields: [
+            { key: 'serviceName', label: 'Tool', type: 'text' },
+            { key: 'vendorName', label: 'Vendor', type: 'text' },
+            { key: 'requestType', label: 'Request type', type: 'radio', options: ['New vendor', 'New service', 'Renewal', 'Change of scope'].map((v) => ({ value: v, label: v })) },
+            { key: 'dataClassification', label: 'Data', type: 'radio', options: ['Public', 'Internal', 'Confidential', 'Restricted'].map((v) => ({ value: v, label: v })) },
+            { key: 'productionAccess', label: 'Prod', type: 'radio', options: ['Yes', 'No'].map((v) => ({ value: v, label: v })) },
+            { key: 'paymentType', label: 'Paid', type: 'radio', options: ['Free', 'Trial', 'Paid'].map((v) => ({ value: v, label: v })) },
+            { key: 'annualCost', label: 'Cost', type: 'money', min: 0, showWhen: { field: 'paymentType', in: ['Paid'] } },
+            { key: 'businessCriticality', label: 'Criticality', type: 'radio', options: ['Low', 'Medium', 'High', 'Critical'].map((v) => ({ value: v, label: v })) },
+            { key: 'seats', label: 'Seats', type: 'integer', min: 1, max: 100 },
+          ],
+        },
+      ],
+    };
+    const answers = { serviceName: 'Tool', vendorName: 'V', requestType: 'New vendor', dataClassification: 'Public', productionAccess: 'No', paymentType: 'Free', businessCriticality: 'Low', seats: 10 };
+    const ok = setup({ id: ID, org_id: ORG, status: 'draft', answers, form: custom });
+    expect((await ok.submit()).status).toBe(200);
+    // Only the custom form's questions are kept; the standard form's are not required.
+    expect(Object.keys(ok.calls[0]!.answers).sort()).toEqual(Object.keys(answers).sort());
+    const tooMany = setup({ id: ID, org_id: ORG, status: 'draft', answers: { ...answers, seats: 101 }, form: custom });
+    const res = await tooMany.submit();
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ fields: { seats: 'Enter 100 or less' } });
+  });
+
+  it('falls back to the standard form when the stored form is broken', async () => {
+    const { submit } = setup({ id: ID, org_id: ORG, status: 'draft', answers: complete, form: { steps: 'broken' } });
+    expect((await submit()).status).toBe(200);
+  });
+
   it('requires a bearer token', async () => {
     const { submit, calls, tokens } = setup({ id: ID, org_id: ORG, status: 'draft', answers: complete });
     expect((await submit({})).status).toBe(401);

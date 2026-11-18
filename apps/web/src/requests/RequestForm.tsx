@@ -1,11 +1,12 @@
 import {
   completenessHints,
+  DEFAULT_REQUEST_FORM,
   firstStepWithErrors,
-  REQUEST_FORM_STEPS,
   validateAnswers,
   visibleFields,
   type AiSuggestion,
   type Answers,
+  type RequestFormDefinition,
 } from '@app/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -18,7 +19,6 @@ import { aiStatus, deleteDraft, saveAnswers, submitRequest, SubmitError } from '
 import { FieldInput } from './FieldInput';
 
 const AUTOSAVE_DELAY_MS = 1500;
-const LAST_STEP = REQUEST_FORM_STEPS.length - 1;
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error';
 
@@ -26,7 +26,7 @@ const SAVE_LABELS: Record<SaveState, string> = {
   saved: 'Draft saved',
   unsaved: 'Unsaved changes',
   saving: 'Saving…',
-  error: 'Could not save. Your changes are kept on this page; we will retry on the next change.',
+  error: 'Not saved yet. Your changes stay on this page; we will try again on your next change.',
 };
 
 interface Props {
@@ -34,11 +34,16 @@ interface Props {
   requestId: string;
   userId: string;
   initialAnswers: Answers;
+  /** The form this draft was started with; null for the standard form. */
+  form: RequestFormDefinition | null;
   onSubmitted: () => void;
   onClose: () => void;
 }
 
-export function RequestForm({ supabase, requestId, userId, initialAnswers, onSubmitted, onClose }: Props) {
+export function RequestForm({ supabase, requestId, userId, initialAnswers, form: ownForm, onSubmitted, onClose }: Props) {
+  const form = ownForm ?? DEFAULT_REQUEST_FORM;
+  const steps = form.steps;
+  const LAST_STEP = steps.length - 1;
   const [answers, setAnswers] = useState<Answers>(initialAnswers);
   const [step, setStep] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -103,6 +108,17 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
     if (errors[key]) setErrors(({ [key]: _removed, ...rest }) => rest);
   }
 
+  /** Moves the keyboard and the screen to the first field with a problem, once it is rendered. */
+  function focusFirstError() {
+    requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>(
+        '.form-card [aria-invalid="true"], .form-card fieldset:has(.field-error) input',
+      );
+      target?.focus();
+      target?.scrollIntoView({ block: 'center' });
+    });
+  }
+
   async function goTo(next: number) {
     setFormError(null);
     setStep(next);
@@ -111,23 +127,27 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
   }
 
   async function next() {
-    const result = validateAnswers(answers, [step]);
+    const result = validateAnswers(answers, [step], form);
     setErrors(result.errors);
     if (Object.keys(result.errors).length > 0) {
-      setFormError('Check the highlighted fields before continuing.');
+      const count = Object.keys(result.errors).length;
+      setFormError(`${count} ${count === 1 ? 'answer needs' : 'answers need'} your attention. The first one is selected.`);
+      focusFirstError();
       return;
     }
     await goTo(step + 1);
   }
 
   async function submit() {
-    const result = validateAnswers(answers);
+    const result = validateAnswers(answers, undefined, form);
     if (Object.keys(result.errors).length > 0) {
       setErrors(result.errors);
-      const target = firstStepWithErrors(result.errors);
+      const target = firstStepWithErrors(result.errors, form);
       setStep(target);
-      setFormError(`Some answers are missing or invalid in step ${target + 1}.`);
-      headingRef.current?.focus();
+      setFormError(
+        `Some answers are missing or invalid in step ${target + 1} (${steps[target]?.title}). The first one is selected.`,
+      );
+      focusFirstError();
       return;
     }
     setBusy(true);
@@ -139,7 +159,7 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
     } catch (error) {
       if (error instanceof SubmitError && Object.keys(error.fields).length > 0) {
         setErrors(error.fields);
-        setStep(Math.max(0, firstStepWithErrors(error.fields)));
+        setStep(Math.max(0, firstStepWithErrors(error.fields, form)));
       }
       setFormError(errorMessage(error));
     } finally {
@@ -161,8 +181,9 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
     }
   }
 
-  const current = REQUEST_FORM_STEPS[step]!;
-  const hints = step === LAST_STEP ? completenessHints(validateAnswers(answers).cleaned) : [];
+  const current = steps[step]!;
+  const hints = step === LAST_STEP ? completenessHints(validateAnswers(answers, undefined, form).cleaned) : [];
+  const hasOptional = visibleFields(step, answers, form).some((f) => f.optional);
 
   return (
     <div className="request-form">
@@ -177,7 +198,7 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
 
       <nav aria-label="Form steps">
         <ol className="stepper">
-          {REQUEST_FORM_STEPS.map((s, index) => (
+          {steps.map((s, index) => (
             <li key={s.title} data-state={index === step ? 'current' : index < step ? 'done' : 'todo'}>
               <button
                 type="button"
@@ -196,11 +217,13 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
 
       <section className="card form-card" aria-labelledby="step-heading">
         <p className="step-count">
-          Step {step + 1} of {REQUEST_FORM_STEPS.length}
+          Step {step + 1} of {steps.length}
         </p>
         <h1 id="step-heading" ref={headingRef} tabIndex={-1}>
           {current.title}
         </h1>
+        {current.description && <p className="step-description">{current.description}</p>}
+        {hasOptional && <p className="field-hint">All questions need an answer unless marked optional.</p>}
 
         <form
           noValidate
@@ -215,6 +238,7 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
               requestId={requestId}
               provider={aiProvider}
               mode="suggest"
+              form={form}
               answers={answers}
               save={save}
               onApply={change}
@@ -222,7 +246,7 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
             />
           )}
 
-          {visibleFields(step, answers).map((field) => (
+          {visibleFields(step, answers, form).map((field) => (
             <FieldInput
               key={field.key}
               field={field}
@@ -240,7 +264,14 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
               <p className="field-hint">
                 Optional: the quote, contract draft, DPA, SOC 2 or ISO report, security questionnaire. Reviewers will see them.
               </p>
-              <Attachments supabase={supabase} requestId={requestId} userId={userId} canUpload canRemoveOwn nameOf={() => 'you'} />
+              <Attachments
+                supabase={supabase}
+                requestId={requestId}
+                userId={userId}
+                canUpload
+                canRemoveOwn
+                nameOf={() => 'you'}
+              />
               {hints.length > 0 && (
                 <section className="hints" aria-labelledby="hints-heading">
                   <h2 id="hints-heading">Before you submit</h2>
@@ -257,18 +288,19 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, onSub
                   requestId={requestId}
                   provider={aiProvider}
                   mode="check"
+                  form={form}
                   answers={answers}
                   save={save}
                   onApply={change}
                 />
               )}
               <h2>Your answers</h2>
-              <AnswerSummary answers={answers} onEdit={(index) => void goTo(index)} />
+              <AnswerSummary form={form} answers={answers} onEdit={(index) => void goTo(index)} />
             </>
           )}
 
           <FormError message={formError} />
-          <div className="form-actions">
+          <div className="form-actions sticky-actions">
             {step > 0 && (
               <button type="button" className="button button-secondary" onClick={() => void goTo(step - 1)}>
                 Back

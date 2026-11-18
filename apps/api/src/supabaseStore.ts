@@ -1,5 +1,5 @@
 import type { Answers, OrgRole, PlannedStage, ReviewTemplate, RiskResult } from '@app/shared';
-import type { AdminStore, Caller } from './admin';
+import type { AdminStore, Caller, SavedFormInput } from './admin';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type SubmittedRecord } from './requests';
 
 export interface SupabaseConfig {
@@ -17,9 +17,18 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
   const rest = `${base}/rest/v1`;
   const service = { apikey: config.serviceRoleKey, authorization: `Bearer ${config.serviceRoleKey}`, 'content-type': 'application/json' };
 
+  async function audit(orgId: string, actorId: string, action: string, entityId: string, metadata: Record<string, unknown>) {
+    const res = await fetchImpl(`${rest}/audit_log`, {
+      method: 'POST',
+      headers: service,
+      body: JSON.stringify({ org_id: orgId, actor_id: actorId, action, entity_type: 'request_form', entity_id: entityId, metadata }),
+    });
+    if (!res.ok) throw new Error(`Supabase responded ${res.status} when writing the audit log`);
+  }
+
   return {
     async getAsUser(accessToken, requestId): Promise<DraftRecord | null> {
-      const query = new URLSearchParams({ id: `eq.${requestId}`, select: 'id,org_id,status,answers' });
+      const query = new URLSearchParams({ id: `eq.${requestId}`, select: 'id,org_id,status,answers,form' });
       const res = await fetchImpl(`${rest}/requests?${query}`, {
         headers: { apikey: config.publishableKey, authorization: `Bearer ${accessToken}` },
       });
@@ -88,6 +97,63 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
         }),
       });
       if (!audit.ok) throw new Error(`Supabase responded ${audit.status} when writing the audit log`);
+    },
+
+    async createRequestForm(orgId: string, form: SavedFormInput, actorId: string) {
+      const res = await fetchImpl(`${rest}/request_form_templates`, {
+        method: 'POST',
+        headers: { ...service, prefer: 'return=representation' },
+        body: JSON.stringify({
+          org_id: orgId,
+          name: form.name,
+          description: form.description,
+          definition: form.definition,
+          created_by: actorId,
+          updated_by: actorId,
+        }),
+      });
+      if (res.status === 409) return 'name-taken' as const;
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when saving a request form`);
+      const [row] = (await res.json()) as { id: string }[];
+      await audit(orgId, actorId, 'request_form.created', row!.id, { name: form.name });
+      return { id: row!.id };
+    },
+
+    async updateRequestForm(orgId: string, id: string, form: SavedFormInput, actorId: string) {
+      const res = await fetchImpl(`${rest}/request_form_templates?${new URLSearchParams({ id: `eq.${id}`, org_id: `eq.${orgId}` })}`, {
+        method: 'PATCH',
+        headers: { ...service, prefer: 'return=representation' },
+        body: JSON.stringify({ name: form.name, description: form.description, definition: form.definition, updated_by: actorId }),
+      });
+      if (res.status === 409) return 'name-taken' as const;
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when saving a request form`);
+      if (((await res.json()) as unknown[]).length === 0) return 'not-found' as const;
+      await audit(orgId, actorId, 'request_form.updated', id, { name: form.name });
+      return 'ok' as const;
+    },
+
+    async deleteRequestForm(orgId: string, id: string, actorId: string) {
+      const res = await fetchImpl(`${rest}/request_form_templates?${new URLSearchParams({ id: `eq.${id}`, org_id: `eq.${orgId}` })}`, {
+        method: 'DELETE',
+        headers: { ...service, prefer: 'return=representation' },
+      });
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when deleting a request form`);
+      const rows = (await res.json()) as { name: string }[];
+      if (rows.length === 0) return 'not-found' as const;
+      await audit(orgId, actorId, 'request_form.deleted', id, { name: rows[0]!.name });
+      return 'ok' as const;
+    },
+
+    async activateRequestForm(orgId: string, id: string | null, actorId: string) {
+      const res = await fetchImpl(`${rest}/rpc/activate_request_form`, {
+        method: 'POST',
+        headers: service,
+        body: JSON.stringify({ p_org_id: orgId, p_template_id: id }),
+      });
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when activating a request form`);
+      if (!((await res.json()) as boolean)) return 'not-found' as const;
+      await audit(orgId, actorId, 'request_form.activated', id ?? 'standard', {});
+      return 'ok' as const;
     },
 
     async submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[]): Promise<SubmittedRecord> {

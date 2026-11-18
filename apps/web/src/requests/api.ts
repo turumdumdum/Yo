@@ -4,6 +4,7 @@ import type {
   AiStatus,
   AiSuggestion,
   Answers,
+  RequestFormDefinition,
   ReviewFieldDef,
   ReviewRule,
   ReviewTemplate,
@@ -24,15 +25,20 @@ export interface RequestRow {
   risk_score: number | null;
   risk_reasons: string[] | null;
   answers: Answers;
+  /** The form the request was started with; null for the standard form. */
+  form: RequestFormDefinition | null;
   requester_id: string;
   created_at: string;
   updated_at: string;
   submitted_at: string | null;
 }
 
-const LIST_COLUMNS = 'id,status,service_name,request_type,risk_tier,requester_id,created_at,updated_at,submitted_at';
+const LIST_COLUMNS = 'id,status,service_name,request_type,risk_tier,requester_id,created_at,updated_at,submitted_at,request_stages(status)';
 
-export type RequestSummary = Omit<RequestRow, 'answers' | 'risk_score' | 'risk_reasons'>;
+export type RequestSummary = Omit<RequestRow, 'answers' | 'risk_score' | 'risk_reasons' | 'form'> & {
+  /** Statuses of the review stages, for progress in lists. */
+  request_stages?: { status: StageStatus }[];
+};
 
 export async function listRequests(supabase: SupabaseClient): Promise<RequestSummary[]> {
   const { data, error } = await supabase.from('requests').select(LIST_COLUMNS).order('updated_at', { ascending: false });
@@ -355,4 +361,48 @@ export async function attachmentDownloadUrl(supabase: SupabaseClient, id: string
 export async function deleteAttachment(supabase: SupabaseClient, id: string): Promise<void> {
   const res = await callApi(supabase, `/v1/attachments/${id}`, 'DELETE');
   if (!res.ok) throw await apiError(res, 'The file could not be removed.');
+}
+
+export interface SavedRequestForm {
+  id: string;
+  name: string;
+  description: string | null;
+  definition: RequestFormDefinition;
+  is_active: boolean;
+  updated_at: string;
+}
+
+/** The organization's saved request forms (org admins and process managers only). */
+export async function listRequestForms(supabase: SupabaseClient, orgId: string): Promise<SavedRequestForm[]> {
+  const { data, error } = await supabase
+    .from('request_form_templates')
+    .select('id,name,description,definition,is_active,updated_at')
+    .eq('org_id', orgId)
+    .order('name');
+  if (error) throw error;
+  return data as SavedRequestForm[];
+}
+
+export interface RequestFormInput {
+  name: string;
+  description: string;
+  definition: RequestFormDefinition;
+}
+
+/** Creates (id null) or updates a saved form through the API, which validates it. Returns its id. */
+export async function saveRequestForm(supabase: SupabaseClient, id: string | null, input: RequestFormInput): Promise<string> {
+  const res = await callApi(supabase, id ? `/v1/request-forms/${id}` : '/v1/request-forms', id ? 'PUT' : 'POST', 30_000, input);
+  if (!res.ok) throw await apiError(res, 'The form could not be saved.');
+  return ((await res.json()) as { id: string }).id;
+}
+
+export async function deleteRequestForm(supabase: SupabaseClient, id: string): Promise<void> {
+  const res = await callApi(supabase, `/v1/request-forms/${id}`, 'DELETE');
+  if (!res.ok) throw await apiError(res, 'The form could not be deleted.');
+}
+
+/** Makes a saved form the one new requests use; null returns to the standard form. */
+export async function activateRequestForm(supabase: SupabaseClient, id: string | null): Promise<void> {
+  const res = await callApi(supabase, `/v1/request-forms/${id ?? 'standard'}/activate`, 'POST');
+  if (!res.ok) throw await apiError(res, 'The form could not be made active.');
 }

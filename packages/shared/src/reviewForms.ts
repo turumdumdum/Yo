@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { REQUEST_FORM_STEPS, type Answers } from './requestForm';
+import { allFields, type Answers } from './requestForm';
 
 // Structured review forms that reviewers fill in for a stage (for example the security
 // review). Like the workflow, a form is data, not code: each organization can change
@@ -359,7 +359,7 @@ const ruleSchema = z.object({
 
 /** Request form fields a rule can depend on: those with a fixed set of answers. */
 export function ruleConditionFields(): { key: string; label: string; options: string[] }[] {
-  return REQUEST_FORM_STEPS.flatMap((s) => s.fields).flatMap((f) =>
+  return allFields().flatMap((f) =>
     (f.type === 'select' || f.type === 'radio') && f.options.length <= 12
       ? [{ key: f.key, label: f.label, options: f.options.map((o) => o.value) }]
       : [],

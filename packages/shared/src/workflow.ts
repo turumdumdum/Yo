@@ -15,8 +15,8 @@ export interface StageRule {
   slaBusinessDays: number;
   /** What the reviewer confirms before approving. */
   checklist: readonly string[];
-  /** Indexes of the form steps this review is mostly about; shown first to the reviewer. */
-  focusSteps: readonly number[];
+  /** Request form fields this review is mostly about; shown first to the reviewer. */
+  focusFields: readonly string[];
 }
 
 export interface WorkflowConfig {
@@ -30,7 +30,7 @@ const DEFAULT_RULES: Record<DefaultStage, Omit<StageRule, 'name'>> = {
   'License check': {
     minTier: 'Low',
     slaBusinessDays: 5,
-    focusSteps: [0, 2, 4],
+    focusFields: ['purpose', 'expectedUsers', 'platforms', 'integrations', 'paymentType', 'contractTermMonths', 'alternatives'],
     checklist: [
       'The license terms allow our intended use',
       'Seats or usage limits cover the expected number of users',
@@ -40,7 +40,7 @@ const DEFAULT_RULES: Record<DefaultStage, Omit<StageRule, 'name'>> = {
   'Security review': {
     minTier: 'Medium',
     slaBusinessDays: 5,
-    focusSteps: [2, 3],
+    focusFields: ['signInMethod', 'platforms', 'integrations', 'vendorUsesAi', 'dataClassification', 'personalData', 'personalDataTypes', 'dataLocation', 'productionAccess'],
     checklist: [
       "The vendor's security documentation was reviewed (for example SOC 2 Type II, ISO/IEC 27001 or a questionnaire)",
       'The sign-in method meets our access policy',
@@ -51,7 +51,7 @@ const DEFAULT_RULES: Record<DefaultStage, Omit<StageRule, 'name'>> = {
   'Legal review': {
     minTier: 'Medium',
     slaBusinessDays: 5,
-    focusSteps: [1, 3, 4],
+    focusFields: ['ourLegalEntity', 'vendorLegalEntity', 'vendorCountry', 'countryOfUse', 'personalData', 'personalDataTypes', 'dataLocation', 'contractTermMonths', 'autoRenewal'],
     checklist: [
       'The contract or terms of service were reviewed',
       'A data processing agreement is in place if personal data is involved',
@@ -62,7 +62,7 @@ const DEFAULT_RULES: Record<DefaultStage, Omit<StageRule, 'name'>> = {
     minTier: 'Low',
     onlyWhen: { field: 'paymentType', label: 'Paid or free', in: ['Paid'] },
     slaBusinessDays: 5,
-    focusSteps: [4, 5],
+    focusFields: ['paymentType', 'annualCost', 'currency', 'contractTermMonths', 'autoRenewal', 'costCenter', 'budgetOwner'],
     checklist: [
       'Budget is available and the budget owner confirmed it',
       'Price, contract term and renewal terms were reviewed',
@@ -72,7 +72,7 @@ const DEFAULT_RULES: Record<DefaultStage, Omit<StageRule, 'name'>> = {
   'IT review': {
     minTier: 'Low',
     slaBusinessDays: 5,
-    focusSteps: [2, 5],
+    focusFields: ['signInMethod', 'platforms', 'integrations', 'integrationsOther', 'expectedUsers', 'accessAdministrator', 'technicalOwner'],
     checklist: [
       'The platform and integrations are supported in our environment',
       'An access administrator and a technical owner are named',
@@ -103,9 +103,9 @@ export interface PlannedStage {
 export const STAGE_DECISIONS = ['Approved', 'Approved with conditions', 'Rejected'] as const;
 export type StageDecision = (typeof STAGE_DECISIONS)[number];
 
-/** Form steps a reviewer of the named stage should look at first; empty for unknown stages. */
-export function focusStepsForStage(stageName: string, config: WorkflowConfig = DEFAULT_WORKFLOW): readonly number[] {
-  return config.stages.find((rule) => rule.name === stageName)?.focusSteps ?? [];
+/** Request form fields a reviewer of the named stage should look at first; empty for unknown stages. */
+export function focusFieldsForStage(stageName: string, config: WorkflowConfig = DEFAULT_WORKFLOW): readonly string[] {
+  return config.stages.find((rule) => rule.name === stageName)?.focusFields ?? [];
 }
 
 /**

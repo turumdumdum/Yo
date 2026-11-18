@@ -19,7 +19,7 @@ describe('supabaseRequestStore', () => {
     const { impl, calls } = fakeFetch(200, [{ id: ID, org_id: 'o', status: 'draft', answers: {} }]);
     const row = await supabaseRequestStore(config, impl).getAsUser('user-token', ID);
     expect(row).toEqual({ id: ID, org_id: 'o', status: 'draft', answers: {} });
-    expect(calls[0]!.url).toBe(`https://project.supabase.co/rest/v1/requests?id=eq.${ID}&select=id%2Corg_id%2Cstatus%2Canswers`);
+    expect(calls[0]!.url).toBe(`https://project.supabase.co/rest/v1/requests?id=eq.${ID}&select=id%2Corg_id%2Cstatus%2Canswers%2Cform`);
     expect(calls[0]!.init!.headers).toEqual({ apikey: 'pub-key', authorization: 'Bearer user-token' });
   });
 

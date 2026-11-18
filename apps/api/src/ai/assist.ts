@@ -1,12 +1,14 @@
 import {
   CATEGORIES,
+  allFields,
+  DEFAULT_REQUEST_FORM,
   fieldLabel,
   normalizeAnswer,
-  REQUEST_FORM_STEPS,
   type AiRemark,
   type AiSource,
   type AiSuggestion,
   type Answers,
+  type RequestFormDefinition,
 } from '@app/shared';
 import type { AiTask, AiTaskResult } from './provider';
 
@@ -74,15 +76,20 @@ function cleanSources(sources: { url: string; title: string | null }[]): AiSourc
 }
 
 /** Keeps only valid values that differ from what the requester already entered. */
-export function suggestionsFromResult(result: AiTaskResult, answers: Answers): AiSuggestion[] {
+export function suggestionsFromResult(
+  result: AiTaskResult,
+  answers: Answers,
+  form: RequestFormDefinition = DEFAULT_REQUEST_FORM,
+): AiSuggestion[] {
   const suggestions: AiSuggestion[] = [];
   for (const field of SUGGESTED_FIELDS) {
     const raw = result.content[field];
     if (typeof raw !== 'string' || raw.trim() === '') continue;
     // "Unknown" is the default answer nobody needs suggested.
     if (field === 'vendorUsesAi' && raw.trim() === 'Unknown') continue;
-    const value = normalizeAnswer(field, field === 'vendorCountry' ? raw.trim().toUpperCase() : raw);
-    if (value === undefined || value === normalizeAnswer(field, answers[field])) continue;
+    // Fields the organization's form does not have are skipped.
+    const value = normalizeAnswer(field, field === 'vendorCountry' ? raw.trim().toUpperCase() : raw, form);
+    if (value === undefined || value === normalizeAnswer(field, answers[field], form)) continue;
     const basis = result.basis.find((b) => b.field === field);
     suggestions.push({
       field,
@@ -95,9 +102,9 @@ export function suggestionsFromResult(result: AiTaskResult, answers: Answers): A
 }
 
 /** Owner fields hold names and emails of colleagues: the AI only learns whether they are filled in. */
-function withoutPeople(answers: Answers): Answers {
+function withoutPeople(answers: Answers, form: RequestFormDefinition): Answers {
   const copy: Answers = { ...answers };
-  for (const field of REQUEST_FORM_STEPS.flatMap((s) => s.fields)) {
+  for (const field of allFields(form)) {
     if (field.type !== 'owner') continue;
     const owner = copy[field.key] as { name?: string; notRequired?: boolean } | undefined;
     copy[field.key] = owner?.notRequired ? 'Not required' : owner?.name ? 'Named' : 'Not answered';
@@ -105,8 +112,8 @@ function withoutPeople(answers: Answers): Answers {
   return copy;
 }
 
-export function answerCheckTask(answers: Answers): AiTask {
-  const fields = REQUEST_FORM_STEPS.flatMap((s) => s.fields).map((f) => `${f.key} (${f.label})`);
+export function answerCheckTask(answers: Answers, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): AiTask {
+  const fields = allFields(form).map((f) => `${f.key} (${f.label})`);
   return {
     instructions:
       'Review the answers of an internal request to buy or use a vendor service, before it goes to security, legal, ' +
@@ -114,7 +121,7 @@ export function answerCheckTask(answers: Answers): AiTask {
       'too vague for a reviewer to act on. Be specific and brief. Do not repeat answers back, do not comment on fields ' +
       `that look fine, and return at most ${MAX_REMARKS} remarks. Return an empty list when nothing stands out. ` +
       `Field keys: ${fields.join(', ')}.`,
-    input: { answers: withoutPeople(answers) },
+    input: { answers: withoutPeople(answers, form) },
     outputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -138,7 +145,7 @@ export function answerCheckTask(answers: Answers): AiTask {
   };
 }
 
-export function remarksFromResult(result: AiTaskResult): AiRemark[] {
+export function remarksFromResult(result: AiTaskResult, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): AiRemark[] {
   const raw = result.content.remarks;
   if (!Array.isArray(raw)) return [];
   const remarks: AiRemark[] = [];
@@ -147,7 +154,7 @@ export function remarksFromResult(result: AiTaskResult): AiRemark[] {
     const { field, severity, message } = item as Record<string, unknown>;
     if (typeof message !== 'string' || message.trim() === '') continue;
     remarks.push({
-      field: typeof field === 'string' && fieldLabel(field) ? field : null,
+      field: typeof field === 'string' && fieldLabel(field, form) ? field : null,
       severity: severity === 'warning' ? 'warning' : 'info',
       message: message.trim().slice(0, MAX_MESSAGE),
     });
