@@ -1,10 +1,9 @@
 import {
-  computeRiskTier,
+  computeRisk,
   DEFAULT_REQUEST_FORM,
   parseRequestForm,
   parseReviewTemplate,
   planStages,
-  riskInputFromAnswers,
   validateAnswers,
   type Answers,
   type PlannedStage,
@@ -96,14 +95,15 @@ export function requestRoutes(store: RequestStore) {
     if (!request) return c.json({ error: 'Not found' }, 404);
     if (request.status !== 'draft') return c.json({ error: 'This request has already been submitted' }, 409);
 
-    const { errors, cleaned } = validateAnswers(request.answers, undefined, formOf(request));
+    const form = formOf(request);
+    const { errors, cleaned } = validateAnswers(request.answers, undefined, form);
     if (Object.keys(errors).length > 0) {
       return c.json({ error: 'Some answers are missing or invalid', fields: errors }, 422);
     }
 
     // Triage: the tier decides which review stages start.
-    const risk = computeRiskTier(riskInputFromAnswers(cleaned));
-    const stages = planStages(risk.tier, cleaned, new Date(), undefined, await reviewTemplates(store, request.org_id));
+    const risk = computeRisk(cleaned, form);
+    const stages = planStages(risk.tier, cleaned, new Date(), undefined, await reviewTemplates(store, request.org_id), form);
     try {
       const submitted = await store.submit(id, cleaned, risk, stages);
       return c.json({

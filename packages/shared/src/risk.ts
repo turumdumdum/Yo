@@ -1,38 +1,25 @@
+import { RISK_TIERS, type RiskTier } from './domain';
 import {
-  RISK_TIERS,
-  type BusinessCriticality,
-  type DataClassification,
-  type RiskTier,
-} from './domain';
+  allFields,
+  DEFAULT_REQUEST_FORM,
+  type Answers,
+  type FieldDef,
+  type OptionRisk,
+  type RequestFormDefinition,
+  type RiskBand,
+  type RiskLevels,
+} from './requestForm';
 
-// Triage risk scoring (CLAUDE.md §6). The scoring configuration is plain data so that an
-// organization can change weights in the workflow builder without a code change.
+// Triage risk scoring (CLAUDE.md §6). How answers affect the risk is part of the request
+// form, so an organization changes it in the form editor without a code change:
+// - a choice of a one-choice or several-choices question can add points and/or set a
+//   minimum tier;
+// - a number or amount can add points when it reaches a threshold (the highest one wins);
+// - the total decides the tier through the form's risk levels.
+// Default weights are a starting proposal, not an approved policy: confirm with the owner.
 
-export interface RiskInput {
-  dataClassification: DataClassification;
-  businessCriticality: BusinessCriticality;
-  productionAccess: boolean;
-  /** Estimated annual cost in the organization's base currency; null/undefined when not Paid. */
-  annualCost?: number | null;
-}
-
-export interface RiskFloor {
-  field: 'dataClassification' | 'businessCriticality' | 'productionAccess';
-  equals: string | boolean;
-  /** The resulting tier is never lower than this when the field matches. */
-  tier: RiskTier;
-}
-
-export interface RiskScoringConfig {
-  dataClassification: Record<DataClassification, number>;
-  businessCriticality: Record<BusinessCriticality, number>;
-  productionAccess: number;
-  /** The band with the highest `minAnnualCost` that the cost reaches applies. */
-  costBands: { minAnnualCost: number; points: number }[];
-  /** Minimum score for each tier. Low is the fallback and is always 0. */
-  tierThresholds: Record<Exclude<RiskTier, 'Low'>, number>;
-  floors: RiskFloor[];
-}
+export const DEFAULT_RISK_LEVELS: RiskLevels = { Medium: 3, High: 6, Critical: 9 };
+export const MAX_RISK_POINTS = 20;
 
 export interface RiskResult {
   tier: RiskTier;
@@ -41,71 +28,101 @@ export interface RiskResult {
   reasons: string[];
 }
 
-// Default weights are a starting proposal, not an approved policy: confirm with the owner.
-export const DEFAULT_RISK_SCORING: RiskScoringConfig = {
-  dataClassification: { Public: 0, Internal: 1, Confidential: 3, Restricted: 5 },
-  businessCriticality: { Low: 0, Medium: 1, High: 2, Critical: 4 },
-  productionAccess: 2,
-  costBands: [
-    { minAnnualCost: 10_000, points: 1 },
-    { minAnnualCost: 50_000, points: 2 },
-    { minAnnualCost: 250_000, points: 3 },
-  ],
-  tierThresholds: { Medium: 3, High: 6, Critical: 9 },
-  floors: [
-    { field: 'dataClassification', equals: 'Restricted', tier: 'High' },
-    { field: 'businessCriticality', equals: 'Critical', tier: 'High' },
-  ],
-};
+const DEFAULT_FIELDS = new Map(allFields(DEFAULT_REQUEST_FORM).map((f) => [f.key, f]));
 
-function tierRank(tier: RiskTier): number {
-  return RISK_TIERS.indexOf(tier);
+const hasChoices = (field: FieldDef): field is Extract<FieldDef, { options: unknown }> =>
+  field.type === 'radio' || field.type === 'select' || field.type === 'multiselect';
+const isNumber = (field: FieldDef): field is Extract<FieldDef, { type: 'integer' | 'money' }> =>
+  field.type === 'integer' || field.type === 'money';
+
+/**
+ * Risk settings of a choice question. Forms saved before risk settings were part of the
+ * form leave them unset; a question with a standard key then keeps the standard settings
+ * for the choices it still offers. An explicit empty object means "no effect on risk".
+ */
+export function choiceRisk(field: FieldDef): Readonly<Record<string, OptionRisk>> {
+  if (!hasChoices(field)) return {};
+  if (field.risk) return field.risk;
+  const standard = DEFAULT_FIELDS.get(field.key);
+  if (!standard || !hasChoices(standard) || !standard.risk) return {};
+  const offered = new Set(field.options.map((o) => o.value));
+  return Object.fromEntries(Object.entries(standard.risk).filter(([value]) => offered.has(value)));
 }
 
-function tierForScore(score: number, thresholds: RiskScoringConfig['tierThresholds']): RiskTier {
-  if (score >= thresholds.Critical) return 'Critical';
-  if (score >= thresholds.High) return 'High';
-  if (score >= thresholds.Medium) return 'Medium';
+/** Point thresholds of a number question; same inheritance rule as `choiceRisk`. */
+export function numberRiskBands(field: FieldDef): readonly RiskBand[] {
+  if (!isNumber(field)) return [];
+  if (field.riskBands) return field.riskBands;
+  const standard = DEFAULT_FIELDS.get(field.key);
+  return standard && isNumber(standard) ? (standard.riskBands ?? []) : [];
+}
+
+/** True when any answer to the question can change the risk. */
+export function affectsRisk(field: FieldDef): boolean {
+  return Object.values(choiceRisk(field)).some((r) => (r.points ?? 0) > 0 || r.atLeast) || numberRiskBands(field).length > 0;
+}
+
+/** The form with inherited risk settings written out, for the editor. */
+export function withRiskDefaults(form: RequestFormDefinition): RequestFormDefinition {
+  return {
+    ...form,
+    riskLevels: form.riskLevels ?? DEFAULT_RISK_LEVELS,
+    steps: form.steps.map((step) => ({
+      ...step,
+      fields: step.fields.map((field) => {
+        if (hasChoices(field)) return { ...field, risk: { ...choiceRisk(field) } };
+        if (isNumber(field)) return { ...field, riskBands: [...numberRiskBands(field)] };
+        return field;
+      }),
+    })),
+  };
+}
+
+function tierForScore(score: number, levels: RiskLevels): RiskTier {
+  if (score >= levels.Critical) return 'Critical';
+  if (score >= levels.High) return 'High';
+  if (score >= levels.Medium) return 'Medium';
   return 'Low';
 }
 
-export function computeRiskTier(
-  input: RiskInput,
-  config: RiskScoringConfig = DEFAULT_RISK_SCORING,
-): RiskResult {
+/** Risk of validated answers (hidden questions are already removed from them). */
+export function computeRisk(cleaned: Answers, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): RiskResult {
   const reasons: string[] = [];
+  const minimums: { tier: RiskTier; reason: string }[] = [];
   let score = 0;
 
-  const add = (points: number, reason: string) => {
-    if (points === 0) return;
-    score += points;
-    reasons.push(`${reason} (+${points})`);
-  };
-
-  add(
-    config.dataClassification[input.dataClassification],
-    `Data classification: ${input.dataClassification}`,
-  );
-  add(
-    config.businessCriticality[input.businessCriticality],
-    `Business criticality: ${input.businessCriticality}`,
-  );
-  if (input.productionAccess) add(config.productionAccess, 'Access to production systems');
-
-  const cost = input.annualCost ?? 0;
-  const band = config.costBands
-    .filter((b) => cost >= b.minAnnualCost)
-    .sort((a, b) => b.minAnnualCost - a.minAnnualCost)[0];
-  if (band) add(band.points, `Estimated annual cost at or above ${band.minAnnualCost}`);
-
-  let tier = tierForScore(score, config.tierThresholds);
-
-  for (const floor of config.floors) {
-    if (input[floor.field] === floor.equals && tierRank(floor.tier) > tierRank(tier)) {
-      tier = floor.tier;
-      reasons.push(`Minimum tier ${floor.tier}: ${floor.field} is ${String(floor.equals)}`);
+  for (const field of allFields(form)) {
+    const value = cleaned[field.key];
+    if (value === undefined) continue;
+    if (hasChoices(field)) {
+      const risk = choiceRisk(field);
+      const chosen = Array.isArray(value) ? value : [value];
+      for (const choice of chosen) {
+        if (typeof choice !== 'string') continue;
+        const setting = risk[choice];
+        if (!setting) continue;
+        const label = field.options.find((o) => o.value === choice)?.label ?? choice;
+        if (setting.points && setting.points > 0) {
+          score += setting.points;
+          reasons.push(`${field.label}: ${label} (+${setting.points})`);
+        }
+        if (setting.atLeast) minimums.push({ tier: setting.atLeast, reason: `${field.label} is ${label}` });
+      }
+    } else if (isNumber(field) && typeof value === 'number') {
+      const band = [...numberRiskBands(field)].filter((b) => value >= b.from).sort((a, b) => b.from - a.from)[0];
+      if (band && band.points > 0) {
+        score += band.points;
+        reasons.push(`${field.label} at or above ${band.from.toLocaleString('en-US')} (+${band.points})`);
+      }
     }
   }
 
+  let tier = tierForScore(score, form.riskLevels ?? DEFAULT_RISK_LEVELS);
+  for (const minimum of minimums) {
+    if (RISK_TIERS.indexOf(minimum.tier) > RISK_TIERS.indexOf(tier)) {
+      tier = minimum.tier;
+      reasons.push(`Minimum tier ${minimum.tier}: ${minimum.reason}`);
+    }
+  }
   return { tier, score, reasons };
 }

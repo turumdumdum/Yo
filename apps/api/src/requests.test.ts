@@ -150,6 +150,26 @@ describe('POST /v1/requests/:id/submit', () => {
     expect(await res.json()).toMatchObject({ fields: { seats: 'Enter 100 or less' } });
   });
 
+  it('scores risk and plans stages from a form without any standard question', async () => {
+    const custom = {
+      steps: [
+        {
+          title: 'Only',
+          fields: [
+            { key: 'tool', label: 'Tool', type: 'text' },
+            { key: 'cards', label: 'Card data?', type: 'radio', options: [{ value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }], risk: { Yes: { points: 1, atLeast: 'Critical' } } },
+          ],
+        },
+      ],
+      titleField: 'tool',
+    };
+    const { submit, calls } = setup({ id: ID, org_id: ORG, status: 'draft', answers: { tool: 'Acme', cards: 'Yes' }, form: custom });
+    expect(await (await submit()).json()).toMatchObject({ riskTier: 'Critical', riskScore: 1 });
+    expect(calls[0]!.risk.reasons).toEqual(['Card data?: Yes (+1)', 'Minimum tier Critical: Card data? is Yes']);
+    // The form does not ask "Paid or free", so the finance review is not skipped on it.
+    expect(calls[0]!.stages.filter((s) => s.status !== 'Not required').map((s) => s.name)).toContain('Finance review');
+  });
+
   it('falls back to the standard form when the stored form is broken', async () => {
     const { submit } = setup({ id: ID, org_id: ORG, status: 'draft', answers: complete, form: { steps: 'broken' } });
     expect((await submit()).status).toBe(200);

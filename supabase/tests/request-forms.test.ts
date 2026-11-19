@@ -82,6 +82,30 @@ describe('request form templates', () => {
     await activate(longId);
   });
 
+  it('name the request after the question the form chooses', async () => {
+    const title = async (id: string) => (await pool.query('select service_name from public.requests where id = $1', [id])).rows[0].service_name;
+    const save = (id: string, answers: object) =>
+      asUser(requester, (c) => c.query('update public.requests set answers = $1 where id = $2', [answers, id]));
+    await asService((c) =>
+      c.query(`update public.request_form_templates set definition = $1 where name = 'Short form'`, [{ ...form('Titled'), titleField: 'tool' }]),
+    );
+    const shortId = (await pool.query(`select id from public.request_form_templates where name = 'Short form'`)).rows[0].id;
+    await asService((c) => c.query('select public.activate_request_form($1, $2)', [org, shortId]));
+    const custom = await newDraft(requester);
+    await save(custom, { tool: '  Acme Board  ', serviceName: 'ignored' });
+    expect(await title(custom)).toBe('Acme Board');
+    await save(custom, { tool: '' });
+    expect(await title(custom)).toBeNull();
+    // Without titleField (the standard form and forms saved earlier) serviceName names it.
+    await asService((c) => c.query('select public.activate_request_form($1, null)', [org]));
+    const standard = await newDraft(requester);
+    await save(standard, { serviceName: 'Figma' });
+    expect(await title(standard)).toBe('Figma');
+    await expect(
+      asUser(requester, (c) => c.query(`update public.requests set service_name = 'Forged' where id = $1`, [standard])),
+    ).rejects.toThrow(/permission denied/);
+  });
+
   it('are visible to org admins and process managers only', async () => {
     const names = (userId: string) =>
       asUser(userId, async (c) => (await c.query<{ name: string }>('select name from public.request_form_templates order by name')).rows.map((r) => r.name));

@@ -1,17 +1,30 @@
 import {
+  affectsRisk,
+  computeRisk,
   DEFAULT_REQUEST_FORM,
+  DEFAULT_RISK_LEVELS,
   FIELD_TYPE_LABELS,
-  isSystemField,
   LIMITS,
+  MAX_RISK_POINTS,
   nameNewQuestions,
   newFieldKey,
   optionsFromLines,
   parseRequestForm,
+  questionsDependingOn,
+  repairRequestForm,
+  RISK_TIERS,
+  titleFieldKey,
+  validateAnswers,
   visibleFields,
+  withRiskDefaults,
   type Answers,
   type FieldDef,
   type FieldType,
+  type OptionRisk,
   type RequestFormDefinition,
+  type RiskBand,
+  type RiskLevels,
+  type RiskTier,
   type StepDef,
 } from '@app/shared';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
@@ -33,6 +46,7 @@ import { FieldInput } from '../requests/FieldInput';
 type Draft = { id: string | null; name: string; description: string; definition: RequestFormDefinition };
 
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const allQuestions = (form: RequestFormDefinition) => form.steps.flatMap((s) => s.fields);
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { dateStyle: 'medium' });
 
 const CHOICE_TYPES: readonly FieldType[] = ['radio', 'select', 'multiselect'];
@@ -65,11 +79,18 @@ function changeType(field: FieldDef, type: FieldType): FieldDef {
   };
   if (CHOICE_TYPES.includes(type)) {
     const options = 'options' in field ? field.options : optionsFromLines('Option 1\nOption 2');
-    return { ...base, type, options } as FieldDef;
+    const risk = 'risk' in field ? field.risk : undefined;
+    return { ...base, type, options, ...(risk ? { risk } : {}) } as FieldDef;
   }
-  if (NUMBER_TYPES.includes(type)) return { ...base, type, min: 0 } as FieldDef;
+  if (NUMBER_TYPES.includes(type)) {
+    const kept = 'min' in field ? { min: field.min, max: field.max, riskBands: field.riskBands } : { min: 0 };
+    return { ...base, type, ...kept } as FieldDef;
+  }
   return { ...base, type } as FieldDef;
 }
+
+const RISK_POINT_CHOICES = [0, 1, 2, 3, 4, 5, 6, 8, 10, 15, MAX_RISK_POINTS];
+const pointsLabel = (n: number) => (n === 0 ? 'No effect' : `+${n} ${n === 1 ? 'point' : 'points'}`);
 
 function describeField(field: FieldDef, form: RequestFormDefinition): string {
   const parts = [FIELD_TYPE_LABELS[field.type], field.optional ? 'optional' : 'required'];
@@ -90,24 +111,147 @@ interface QuestionEditorProps {
   earlierChoices: FieldDef[];
   steps: readonly StepDef[];
   stepIndex: number;
+  levels: RiskLevels;
+  /** This question's answer names the request. */
+  isTitle: boolean;
   onChange: (field: FieldDef) => void;
+  onMakeTitle: () => void;
   onMoveToStep: (step: number) => void;
 }
 
-function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onMoveToStep }: QuestionEditorProps) {
+/** How each choice of a question changes the risk. */
+function ChoiceRiskEditor({ field, levels, onChange }: { field: Extract<FieldDef, { options: unknown }>; levels: RiskLevels; onChange: (f: FieldDef) => void }) {
   const id = useId();
-  const locked = isSystemField(field.key);
+  const risk = field.risk ?? {};
+  const set = (value: string, patch: OptionRisk) => {
+    const merged = { ...risk[value], ...patch };
+    const clean: OptionRisk = {
+      ...(merged.points ? { points: merged.points } : {}),
+      ...(merged.atLeast ? { atLeast: merged.atLeast } : {}),
+    };
+    const next = { ...risk };
+    if (clean.points || clean.atLeast) next[value] = clean;
+    else delete next[value];
+    onChange({ ...field, risk: next } as FieldDef);
+  };
+  return (
+    <fieldset className="field risk-editor">
+      <legend>Effect on risk</legend>
+      <RiskExplainer levels={levels} />
+      <ul className="risk-rows">
+        {field.options.map((o, i) => (
+          <li key={o.value}>
+            <span className="risk-answer">{o.label}</span>
+            <label className="visually-hidden" htmlFor={`${id}-p${i}`}>
+              Risk points for “{o.label}”
+            </label>
+            <select id={`${id}-p${i}`} value={risk[o.value]?.points ?? 0} onChange={(e) => set(o.value, { points: Number(e.target.value) })}>
+              {RISK_POINT_CHOICES.map((n) => (
+                <option key={n} value={n}>
+                  {pointsLabel(n)}
+                </option>
+              ))}
+            </select>
+            <label className="visually-hidden" htmlFor={`${id}-m${i}`}>
+              Lowest risk level when “{o.label}” is chosen
+            </label>
+            <select
+              id={`${id}-m${i}`}
+              value={risk[o.value]?.atLeast ?? ''}
+              onChange={(e) => set(o.value, { atLeast: (e.target.value || undefined) as RiskTier | undefined })}
+            >
+              <option value="">No minimum level</option>
+              {RISK_TIERS.filter((t) => t !== 'Low').map((t) => (
+                <option key={t} value={t}>
+                  Always at least {t}
+                </option>
+              ))}
+            </select>
+          </li>
+        ))}
+      </ul>
+    </fieldset>
+  );
+}
+
+/** Points added when a number reaches a threshold. */
+function NumberRiskEditor({ field, levels, onChange }: { field: Extract<FieldDef, { min: number }>; levels: RiskLevels; onChange: (f: FieldDef) => void }) {
+  const id = useId();
+  const bands = field.riskBands ?? [];
+  const setBands = (next: RiskBand[]) => onChange({ ...field, riskBands: next } as FieldDef);
+  return (
+    <fieldset className="field risk-editor">
+      <legend>Effect on risk</legend>
+      <RiskExplainer levels={levels} />
+      {bands.length === 0 && <p className="field-hint">The answer does not change the risk.</p>}
+      <ul className="risk-rows">
+        {bands.map((band, i) => (
+          <li key={i}>
+            <label htmlFor={`${id}-f${i}`}>From</label>
+            <input
+              id={`${id}-f${i}`}
+              type="number"
+              value={band.from}
+              onChange={(e) => setBands(bands.map((b, j) => (j === i ? { ...b, from: Number(e.target.value) || 0 } : b)))}
+            />
+            <label className="visually-hidden" htmlFor={`${id}-b${i}`}>
+              Risk points from {band.from}
+            </label>
+            <select
+              id={`${id}-b${i}`}
+              value={band.points}
+              onChange={(e) => setBands(bands.map((b, j) => (j === i ? { ...b, points: Number(e.target.value) } : b)))}
+            >
+              {RISK_POINT_CHOICES.map((n) => (
+                <option key={n} value={n}>
+                  {pointsLabel(n)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              aria-label={`Remove the threshold from ${band.from}`}
+              onClick={() => setBands(bands.filter((_, j) => j !== i))}
+            >
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+      {bands.length < 10 && (
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => {
+            const top = bands.reduce((m, b) => Math.max(m, b.from), field.min);
+            setBands([...bands, { from: top > 0 ? top * 2 : 100, points: 1 }]);
+          }}
+        >
+          + Add a threshold
+        </button>
+      )}
+      <p className="field-hint">When the answer reaches several thresholds, only the highest one counts.</p>
+    </fieldset>
+  );
+}
+
+function RiskExplainer({ levels }: { levels: RiskLevels }) {
+  return (
+    <p className="field-hint">
+      Each request gets a risk level from the points of its answers: {levels.Medium}+ points is Medium, {levels.High}+ is High,{' '}
+      {levels.Critical}+ is Critical. Higher risk means more checks before approval.
+    </p>
+  );
+}
+
+function QuestionEditor({ field, earlierChoices, steps, stepIndex, levels, isTitle, onChange, onMakeTitle, onMoveToStep }: QuestionEditorProps) {
+  const id = useId();
   const [choicesText, setChoicesText] = useState('options' in field ? field.options.map((o) => o.value).join('\n') : '');
   const controller = field.showWhen ? earlierChoices.find((f) => f.key === field.showWhen!.field) : undefined;
 
   return (
     <div className="question-editor">
-      {locked && (
-        <p className="notice">
-          This question is used to work out the risk of a request, so it cannot be removed and its answer type and choices are
-          fixed. You can change its wording, help text, example and position.
-        </p>
-      )}
       <div className="editor-row">
         <div className="field">
           <label htmlFor={`${id}-label`}>Question</label>
@@ -123,7 +267,6 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
           <select
             id={`${id}-type`}
             value={field.type}
-            disabled={locked}
             onChange={(e) => onChange(changeType(field, e.target.value as FieldType))}
           >
             {(Object.keys(FIELD_TYPE_LABELS) as FieldType[]).map((t) => (
@@ -164,11 +307,16 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
         <input
           type="checkbox"
           checked={!field.optional}
-          disabled={locked}
           onChange={(e) => onChange({ ...field, optional: e.target.checked ? undefined : true })}
         />
         The requester must answer this question
       </label>
+      {field.type === 'text' && (
+        <label className="choice">
+          <input type="checkbox" checked={isTitle} disabled={isTitle} onChange={onMakeTitle} />
+          Use the answer as the name of the request in lists
+        </label>
+      )}
 
       {CHOICE_TYPES.includes(field.type) && (
         <div className="field">
@@ -177,7 +325,6 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
             id={`${id}-choices`}
             rows={Math.min(10, Math.max(3, choicesText.split('\n').length + 1))}
             value={choicesText}
-            disabled={locked}
             onChange={(e) => {
               setChoicesText(e.target.value);
               onChange({ ...field, options: optionsFromLines(e.target.value) } as FieldDef);
@@ -185,6 +332,8 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
           />
         </div>
       )}
+
+      {'options' in field && <ChoiceRiskEditor field={field} levels={levels} onChange={onChange} />}
 
       {TEXT_TYPES.includes(field.type) && field.type !== 'date' && (
         <div className="field narrow">
@@ -213,7 +362,6 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
               id={`${id}-min`}
               inputMode="decimal"
               value={field.min}
-              disabled={locked}
               onChange={(e) => {
                 const n = Number(e.target.value);
                 onChange({ ...field, min: Number.isFinite(n) ? n : 0 } as FieldDef);
@@ -226,7 +374,6 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
               id={`${id}-maxn`}
               inputMode="decimal"
               value={field.max ?? ''}
-              disabled={locked}
               onChange={(e) => {
                 const n = Number(e.target.value);
                 onChange({ ...field, max: e.target.value.trim() !== '' && Number.isFinite(n) ? n : undefined } as FieldDef);
@@ -235,6 +382,7 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
           </div>
         </div>
       )}
+      {'min' in field && <NumberRiskEditor field={field} levels={levels} onChange={onChange} />}
 
       <fieldset className="field">
         <legend>When to ask</legend>
@@ -244,7 +392,6 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
             <select
               id={`${id}-when`}
               value={field.showWhen?.field ?? ''}
-              disabled={locked}
               onChange={(e) =>
                 onChange({ ...field, showWhen: e.target.value ? { field: e.target.value, in: [] } : undefined } as FieldDef)
               }
@@ -266,7 +413,6 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
                 <label key={o.value} className="choice">
                   <input
                     type="checkbox"
-                    disabled={locked}
                     checked={field.showWhen!.in.includes(o.value)}
                     onChange={(e) => {
                       const current = field.showWhen!.in;
@@ -304,6 +450,7 @@ function QuestionEditor({ field, earlierChoices, steps, stepIndex, onChange, onM
 
 function Preview({ form }: { form: RequestFormDefinition }) {
   const [answers, setAnswers] = useState<Answers>({});
+  const risk = computeRisk(validateAnswers(answers, undefined, form).cleaned, form);
   return (
     <div className="form-preview">
       <p className="notice">
@@ -326,6 +473,22 @@ function Preview({ form }: { form: RequestFormDefinition }) {
           ))}
         </section>
       ))}
+      <div className="card preview-risk" role="status">
+        <p>
+          With these answers the request would get the risk level{' '}
+          <span className="status-badge" data-tone={risk.tier === 'Low' ? 'approved' : risk.tier === 'Medium' ? 'review' : 'waiting'}>
+            {risk.tier}
+          </span>{' '}
+          ({risk.score} {risk.score === 1 ? 'point' : 'points'}).
+        </p>
+        {risk.reasons.length > 0 && (
+          <ul className="stage-meta">
+            {risk.reasons.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
@@ -364,10 +527,26 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
     return 'error' in result ? result.error : null;
   }, [draft.definition]);
 
-  function setSteps(next: StepDef[]) {
-    setDraft((d) => ({ ...d, definition: { steps: next } }));
+  const levels = draft.definition.riskLevels ?? DEFAULT_RISK_LEVELS;
+  const titleKey = draft.definition.titleField ?? (allQuestions(draft.definition).some((f) => f.key === 'serviceName' && f.type === 'text') ? titleFieldKey(draft.definition) : undefined);
+  const textQuestions = allQuestions(draft.definition).filter((f) => f.type === 'text');
+
+  function setDefinition(next: RequestFormDefinition) {
+    setDraft((d) => ({ ...d, definition: repairRequestForm(next) }));
     setDirty(true);
     setError(null);
+  }
+  const setSteps = (next: StepDef[]) => setDefinition({ ...draft.definition, steps: next });
+  function removeQuestion(si: number, fi: number) {
+    const field = steps[si]!.fields[fi]!;
+    const dependents = questionsDependingOn(draft.definition, field.key);
+    const extra = dependents.length
+      ? `\n\n${dependents.map((f) => `“${f.label}”`).join(', ')} ${dependents.length === 1 ? 'is' : 'are'} shown only after an answer to it, and will then always be shown.`
+      : '';
+    const title = field.key === titleKey ? '\n\nIts answer names the request; choose another question for that in Form settings.' : '';
+    if (window.confirm(`Remove “${field.label}”?${extra}${title}`)) {
+      updateStep(si, { fields: steps[si]!.fields.filter((_, j) => j !== fi) });
+    }
   }
   const updateStep = (i: number, patch: Partial<StepDef>) => setSteps(steps.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const updateField = (si: number, fi: number, field: FieldDef) =>
@@ -449,6 +628,55 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
         </div>
       </div>
 
+      <details className="form-settings">
+        <summary>Form settings: request name and risk levels</summary>
+        <div className="editor-row">
+          <div className="field">
+            <label htmlFor="form-title-field">Which answer names the request?</label>
+            {textQuestions.length > 0 ? (
+              <select
+                id="form-title-field"
+                value={titleKey ?? ''}
+                onChange={(e) => setDefinition({ ...draft.definition, titleField: e.target.value })}
+              >
+                {!titleKey && <option value="">Choose a question</option>}
+                {textQuestions.map((f) => (
+                  <option key={f.key} value={f.key}>
+                    {f.label || 'Untitled question'}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="field-hint">Add a short-text question, for example “Service name”, to name requests in lists.</p>
+            )}
+          </div>
+        </div>
+        <fieldset className="field">
+          <legend>Risk levels</legend>
+          <p className="field-hint">
+            Answers can add risk points (set them on each question). The total decides the level; below {levels.Medium} points a
+            request is Low risk.
+          </p>
+          <div className="editor-row risk-levels">
+            {(['Medium', 'High', 'Critical'] as const).map((tier) => (
+              <div className="field" key={tier}>
+                <label htmlFor={`level-${tier}`}>{tier} from</label>
+                <input
+                  id={`level-${tier}`}
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={levels[tier]}
+                  onChange={(e) =>
+                    setDefinition({ ...draft.definition, riskLevels: { ...levels, [tier]: Math.max(1, Math.round(Number(e.target.value) || 1)) } })
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        </fieldset>
+      </details>
+
       <div className="segmented" role="group" aria-label="Edit or preview">
         <button type="button" aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}>
           Edit
@@ -463,7 +691,6 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
       ) : (
         <ol className="form-steps-editor">
           {steps.map((step, si) => {
-            const hasSystem = step.fields.some((f) => isSystemField(f.key));
             return (
               <li key={si} className="step-editor">
                 <div className="step-editor-head">
@@ -511,7 +738,8 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
                             <div className="question-summary">
                               <span className="question-text">
                                 <strong>{field.label || 'Untitled question'}</strong>
-                                {isSystemField(field.key) && <span className="lock-tag">Used for risk</span>}
+                                {field.key === titleKey && <span className="lock-tag">Names the request</span>}
+                                {affectsRisk(field) && <span className="lock-tag risk-tag">Affects risk</span>}
                                 <span className="stage-meta">{describeField(field, draft.definition)}</span>
                               </span>
                               <span className="question-actions">
@@ -542,19 +770,14 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
                                 >
                                   ↓
                                 </button>
-                                {!isSystemField(field.key) && (
-                                  <button
-                                    type="button"
-                                    className="button button-secondary button-small"
-                                    aria-label={`Remove “${field.label}”`}
-                                    onClick={() => {
-                                      if (window.confirm(`Remove “${field.label}”?`))
-                                        updateStep(si, { fields: step.fields.filter((_, j) => j !== fi) });
-                                    }}
-                                  >
-                                    Remove
-                                  </button>
-                                )}
+                                <button
+                                  type="button"
+                                  className="button button-secondary button-small"
+                                  aria-label={`Remove “${field.label}”`}
+                                  onClick={() => removeQuestion(si, fi)}
+                                >
+                                  Remove
+                                </button>
                               </span>
                             </div>
                             {isOpen && (
@@ -563,6 +786,9 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
                                 earlierChoices={earlierChoices}
                                 steps={steps}
                                 stepIndex={si}
+                                levels={levels}
+                                isTitle={field.key === titleKey}
+                                onMakeTitle={() => setDefinition({ ...draft.definition, titleField: field.key })}
                                 onChange={(next) => updateField(si, fi, next)}
                                 onMoveToStep={(target) => {
                                   if (target === si) return;
@@ -615,8 +841,7 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
                       <button
                         type="button"
                         className="button button-secondary button-small"
-                        disabled={hasSystem || steps.length === 1}
-                        title={hasSystem ? 'Move the questions used for risk to another step first' : undefined}
+                        disabled={steps.length === 1}
                         onClick={() => {
                           if (window.confirm(`Remove step “${step.title}” and its questions?`))
                             setSteps(steps.filter((_, j) => j !== si));
@@ -625,9 +850,6 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
                         Remove step
                       </button>
                     </div>
-                    {hasSystem && steps.length > 1 && (
-                      <p className="field-hint">This step has questions used for risk, so it cannot be removed.</p>
-                    )}
                   </>
                 )}
               </li>
@@ -777,7 +999,7 @@ export function RequestFormsSection({ supabase, orgId }: { supabase: SupabaseCli
                   id: null,
                   name: uniqueName('My request form'),
                   description: '',
-                  definition: copy(DEFAULT_REQUEST_FORM),
+                  definition: withRiskDefaults(copy(DEFAULT_REQUEST_FORM)),
                 })
               }
             >
@@ -826,7 +1048,7 @@ export function RequestFormsSection({ supabase, orgId }: { supabase: SupabaseCli
                       id: form.id,
                       name: form.name,
                       description: form.description ?? '',
-                      definition: copy(form.definition),
+                      definition: withRiskDefaults(copy(form.definition)),
                     })
                   }
                 >
@@ -841,7 +1063,7 @@ export function RequestFormsSection({ supabase, orgId }: { supabase: SupabaseCli
                       id: null,
                       name: uniqueName(`${form.name} (copy)`),
                       description: form.description ?? '',
-                      definition: copy(form.definition),
+                      definition: withRiskDefaults(copy(form.definition)),
                     })
                   }
                 >

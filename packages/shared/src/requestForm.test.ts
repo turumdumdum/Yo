@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { computeRiskTier } from './risk';
+import { computeRisk } from './risk';
 import {
   completenessHints,
   firstStepWithErrors,
   formatAnswer,
   REQUEST_FORM_STEPS,
-  riskInputFromAnswers,
   validateAnswers,
   visibleFields,
   withHttps,
@@ -182,21 +181,16 @@ describe('validateAnswers', () => {
 });
 
 describe('derived values', () => {
-  it('builds the triage input from cleaned answers', () => {
+  it('works out the risk from cleaned answers', () => {
     const { cleaned } = validateAnswers(complete);
-    expect(riskInputFromAnswers(cleaned)).toEqual({
-      dataClassification: 'Confidential',
-      businessCriticality: 'High',
-      productionAccess: false,
-      annualCost: 60000,
-    });
     // Confidential 3 + High 2 + cost band 2 = 7.
-    expect(computeRiskTier(riskInputFromAnswers(cleaned))).toMatchObject({ tier: 'High', score: 7 });
+    expect(computeRisk(cleaned)).toMatchObject({ tier: 'High', score: 7 });
   });
 
   it('ignores cost for free services', () => {
     const { cleaned } = validateAnswers({ ...complete, paymentType: 'Free' });
-    expect(riskInputFromAnswers(cleaned).annualCost).toBeNull();
+    expect(cleaned.annualCost).toBeUndefined();
+    expect(computeRisk(cleaned).score).toBe(5);
   });
 
   it('formats answers for the summary', () => {
@@ -218,5 +212,8 @@ describe('derived values', () => {
     expect(
       completenessHints({ dataClassification: 'Public', vendorUsesAi: 'No', paymentType: 'Free', alternatives: 'Tool B' }),
     ).toEqual([]);
+    // No hint about a question the form does not ask.
+    const noAlternatives = { steps: [{ title: 'S', fields: [{ key: 'tool', label: 'Tool', type: 'text' as const }] }] };
+    expect(completenessHints({}, noAlternatives)).toEqual([]);
   });
 });

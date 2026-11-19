@@ -124,10 +124,10 @@ describe('request forms API', () => {
 
   it('explains what is wrong with a form and stores nothing', async () => {
     const { formCall, forms } = setup(orgAdmin);
-    const broken = { ...valid, definition: { steps: [{ title: 'Only', fields: [{ key: 'q', label: 'Q', type: 'text' }] }] } };
+    const broken = { ...valid, definition: { steps: [{ title: 'Only', fields: [{ key: 'q', label: 'Q', type: 'text', optional: true }] }], titleField: 'q' } };
     const res = await formCall('POST', '', broken);
     expect(res.status).toBe(422);
-    expect(((await res.json()) as { error: string }).error).toMatch(/must keep “Service name”/);
+    expect(((await res.json()) as { error: string }).error).toMatch(/names the request, so it must be required/);
     expect((await formCall('POST', '', { ...valid, name: ' ' })).status).toBe(422);
     expect((await formCall('POST', '', '{oops')).status).toBe(400);
     expect(forms).toEqual([]);

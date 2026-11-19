@@ -1,5 +1,5 @@
 import { DEFAULT_STAGES, RISK_TIERS, type RiskTier, type StageStatus } from './domain';
-import type { Answers } from './requestForm';
+import type { Answers, RequestFormDefinition } from './requestForm';
 import { defaultReviewTemplate, type ReviewFieldDef, type ReviewRule, type ReviewTemplate } from './reviewForms';
 
 // Default workflow (CLAUDE.md §6): after triage the required review stages start in
@@ -131,12 +131,19 @@ export function planStages(
   config: WorkflowConfig = DEFAULT_WORKFLOW,
   /** The organization's review forms by stage name; stages without one get the default form. */
   reviewTemplates: Readonly<Record<string, ReviewTemplate>> = {},
+  /** The form the request used. A condition on a question the form does not ask is ignored. */
+  form?: RequestFormDefinition,
 ): PlannedStage[] {
+  const asks = (when: NonNullable<StageRule['onlyWhen']>) => {
+    if (!form) return true;
+    const field = form.steps.flatMap((s) => s.fields).find((f) => f.key === when.field);
+    return !!field && 'options' in field && field.options.some((o) => when.in.includes(o.value));
+  };
   return config.stages.map((rule) => {
     let note: string | null = null;
     if (RISK_TIERS.indexOf(tier) < RISK_TIERS.indexOf(rule.minTier)) {
       note = `Not required for ${tier} risk`;
-    } else if (rule.onlyWhen) {
+    } else if (rule.onlyWhen && asks(rule.onlyWhen)) {
       const value = answers[rule.onlyWhen.field];
       if (typeof value !== 'string' || !rule.onlyWhen.in.includes(value)) {
         note = `Not required: ${rule.onlyWhen.label} is ${typeof value === 'string' ? value : 'not answered'}`;

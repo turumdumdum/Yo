@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BUSINESS_CRITICALITIES, DATA_CLASSIFICATIONS, ORG_ROLES } from './domain';
+import { ORG_ROLES } from './domain';
 
 // Server-side input validation shared with the frontend (CLAUDE.md §12).
 
@@ -16,9 +16,3 @@ export const createInvitationSchema = z.object({
 });
 export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
 
-export const riskInputSchema = z.object({
-  dataClassification: z.enum(DATA_CLASSIFICATIONS),
-  businessCriticality: z.enum(BUSINESS_CRITICALITIES),
-  productionAccess: z.boolean(),
-  annualCost: z.number().nonnegative().finite().nullish(),
-});

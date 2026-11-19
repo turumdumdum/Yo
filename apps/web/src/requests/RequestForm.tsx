@@ -8,7 +8,7 @@ import {
   type Answers,
   type RequestFormDefinition,
 } from '@app/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
@@ -19,6 +19,8 @@ import { aiStatus, deleteDraft, saveAnswers, submitRequest, SubmitError } from '
 import { FieldInput } from './FieldInput';
 
 const AUTOSAVE_DELAY_MS = 1500;
+/** Rough time a requester spends per question, for the "minutes left" estimate. */
+const SECONDS_PER_QUESTION = 20;
 
 type SaveState = 'saved' | 'unsaved' | 'saving' | 'error';
 
@@ -105,7 +107,12 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, form:
 
   function change(key: string, value: unknown) {
     setAnswers((current) => ({ ...current, [key]: value }));
-    if (errors[key]) setErrors(({ [key]: _removed, ...rest }) => rest);
+    if (errors[key]) {
+      const { [key]: _removed, ...rest } = errors;
+      setErrors(rest);
+      // Every problem is fixed: the message about them no longer applies.
+      if (Object.keys(rest).length === 0) setFormError(null);
+    }
   }
 
   /** Moves the keyboard and the screen to the first field with a problem, once it is rendered. */
@@ -181,8 +188,29 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, form:
     }
   }
 
+  // How far the requester is: required questions answered, and which steps are complete.
+  const progress = useMemo(() => {
+    let total = 0;
+    let done = 0;
+    const complete = steps.map((_, i) => {
+      const { errors: stepErrors } = validateAnswers(answers, [i], form);
+      const required = visibleFields(i, answers, form).filter((f) => !f.optional);
+      total += required.length;
+      done += required.filter((f) => !(f.key in stepErrors)).length;
+      return Object.keys(stepErrors).length === 0;
+    });
+    const left = total - done;
+    return {
+      total,
+      done,
+      complete,
+      percent: total === 0 ? 100 : Math.round((done * 100) / total),
+      minutesLeft: Math.max(1, Math.ceil((left * SECONDS_PER_QUESTION) / 60)),
+    };
+  }, [answers, form, steps]);
+
   const current = steps[step]!;
-  const hints = step === LAST_STEP ? completenessHints(validateAnswers(answers, undefined, form).cleaned) : [];
+  const hints = step === LAST_STEP ? completenessHints(validateAnswers(answers, undefined, form).cleaned, form) : [];
   const hasOptional = visibleFields(step, answers, form).some((f) => f.optional);
 
   return (
@@ -198,26 +226,63 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, form:
 
       <nav aria-label="Form steps">
         <ol className="stepper">
-          {steps.map((s, index) => (
-            <li key={s.title} data-state={index === step ? 'current' : index < step ? 'done' : 'todo'}>
-              <button
-                type="button"
-                // The title is hidden on narrow screens, so the name must not depend on it.
-                aria-label={`Step ${index + 1}: ${s.title}`}
-                aria-current={index === step ? 'step' : undefined}
-                onClick={() => void goTo(index)}
-              >
-                <span className="step-number">{index + 1}</span>
-                <span className="step-title">{s.title}</span>
-              </button>
-            </li>
-          ))}
+          {steps.map((s, index) => {
+            const done = progress.complete[index] && index !== step;
+            return (
+              <li key={`${index}-${s.title}`} data-state={index === step ? 'current' : done ? 'done' : 'todo'}>
+                <button
+                  type="button"
+                  // The title is hidden on narrow screens, so the name must not depend on it.
+                  aria-label={`Step ${index + 1}: ${s.title}${done ? ', complete' : ''}`}
+                  aria-current={index === step ? 'step' : undefined}
+                  onClick={() => void goTo(index)}
+                >
+                  <span className="step-number" aria-hidden="true">
+                    {done ? '✓' : index + 1}
+                  </span>
+                  <span className="step-title">{s.title}</span>
+                </button>
+              </li>
+            );
+          })}
         </ol>
       </nav>
+
+      <div className="form-progress">
+        <div
+          className="progress-track"
+          role="progressbar"
+          aria-label="Required questions answered"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress.percent}
+        >
+          <span style={{ width: `${progress.percent}%` }} />
+        </div>
+        <p>
+          {progress.done === progress.total
+            ? 'All required questions are answered. Check your answers and submit.'
+            : `${progress.done} of ${progress.total} required answers · about ${progress.minutesLeft} min left`}
+        </p>
+      </div>
+
+      {step === 0 && progress.done === 0 && (
+        <section className="welcome card" aria-labelledby="welcome-heading">
+          <h2 id="welcome-heading">Let’s get your request ready</h2>
+          <ul>
+            <li>
+              It takes about {progress.minutesLeft} minutes, in {steps.length} short {steps.length === 1 ? 'step' : 'steps'}.
+            </li>
+            <li>Your answers save automatically, so you can stop and come back at any time.</li>
+            <li>Not sure about an answer? Give your best guess. Reviewers will ask you if they need more.</li>
+          </ul>
+        </section>
+      )}
 
       <section className="card form-card" aria-labelledby="step-heading">
         <p className="step-count">
           Step {step + 1} of {steps.length}
+          {progress.complete[step] ? ' · complete' : ''}
         </p>
         <h1 id="step-heading" ref={headingRef} tabIndex={-1}>
           {current.title}
@@ -296,6 +361,14 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, form:
               )}
               <h2>Your answers</h2>
               <AnswerSummary form={form} answers={answers} onEdit={(index) => void goTo(index)} />
+              <section className="what-next" aria-labelledby="what-next-heading">
+                <h2 id="what-next-heading">What happens after you submit</h2>
+                <ol>
+                  <li>We work out the risk level from your answers and start the checks it needs.</li>
+                  <li>Reviewers look at your request. If they have a question, you get an email and see it on the request page.</li>
+                  <li>You can follow every check and the final decision on the request page.</li>
+                </ol>
+              </section>
             </>
           )}
 
@@ -307,7 +380,20 @@ export function RequestForm({ supabase, requestId, userId, initialAnswers, form:
               </button>
             )}
             <button type="submit" className="button" disabled={busy}>
-              {step === LAST_STEP ? (busy ? 'Submitting…' : 'Submit request') : 'Save and continue'}
+              {step === LAST_STEP ? (
+                busy ? (
+                  'Submitting…'
+                ) : (
+                  'Submit request'
+                )
+              ) : (
+                <>
+                  Next: {steps[step + 1]!.title}
+                  <span className="button-arrow" aria-hidden="true">
+                    →
+                  </span>
+                </>
+              )}
             </button>
           </div>
         </form>

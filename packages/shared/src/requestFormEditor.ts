@@ -1,12 +1,12 @@
+import { RISK_TIERS } from './domain';
 import {
-  DEFAULT_REQUEST_FORM,
-  SYSTEM_FIELD_KEYS,
   type FieldDef,
   type FieldType,
   type Option,
   type RequestFormDefinition,
   type StepDef,
 } from './requestForm';
+import { MAX_RISK_POINTS } from './risk';
 
 // Checks a request form an administrator built, before it is stored or used. Shared by the
 // editor (instant feedback) and the API (the check that counts). Returns the first problem
@@ -44,13 +44,6 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   owner: 'Person (name or “Not required”)',
 };
 
-const SYSTEM = new Set<string>(SYSTEM_FIELD_KEYS);
-const DEFAULT_FIELDS = new Map(DEFAULT_REQUEST_FORM.steps.flatMap((s) => s.fields).map((f) => [f.key, f]));
-
-export function isSystemField(key: string): boolean {
-  return SYSTEM.has(key);
-}
-
 const isChoice = (type: FieldType) => type === 'select' || type === 'radio' || type === 'multiselect';
 const isText = (type: FieldType) => ['text', 'textarea', 'url', 'email', 'phone', 'date'].includes(type);
 const isNumber = (type: FieldType) => type === 'integer' || type === 'money';
@@ -58,8 +51,7 @@ const TYPES = new Set(Object.keys(FIELD_TYPE_LABELS));
 
 const str = (value: unknown, max: number) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 const optionalStr = (value: unknown, max: number) => value === undefined || (typeof value === 'string' && value.length <= max);
-const sameValues = (a: readonly Option[], b: readonly Option[]) =>
-  a.length === b.length && a.every((o, i) => o.value === b[i]!.value);
+const riskPoints = (value: unknown) => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= MAX_RISK_POINTS;
 
 function checkField(raw: unknown, seen: Map<string, FieldDef>, where: string): string | null {
   if (!raw || typeof raw !== 'object') return `${where}: a field is malformed`;
@@ -86,7 +78,18 @@ function checkField(raw: unknown, seen: Map<string, FieldDef>, where: string): s
       if (values.has(o.value!)) return `${name} lists the choice “${o.value}” twice`;
       values.add(o.value!);
     }
-  } else if (f.options !== undefined) return `${name} cannot have choices`;
+    if (f.risk !== undefined) {
+      if (!f.risk || typeof f.risk !== 'object' || Array.isArray(f.risk)) return `${name}: the risk settings are malformed`;
+      for (const [value, setting] of Object.entries(f.risk as Record<string, unknown>)) {
+        if (!values.has(value)) return `${name}: the risk settings mention “${value}”, which is not one of its choices`;
+        const r = setting as { points?: unknown; atLeast?: unknown } | null;
+        if (!r || typeof r !== 'object') return `${name}: the risk settings are malformed`;
+        if (r.points !== undefined && !riskPoints(r.points)) return `${name}: risk points must be a whole number from 0 to ${MAX_RISK_POINTS}`;
+        if (r.atLeast !== undefined && !(RISK_TIERS as readonly unknown[]).includes(r.atLeast)) return `${name}: the minimum risk level is unknown`;
+        if (Object.keys(r).some((k) => k !== 'points' && k !== 'atLeast')) return `${name}: the risk settings are malformed`;
+      }
+    }
+  } else if (f.options !== undefined || f.risk !== undefined) return `${name} cannot have choices`;
 
   if (isText(type)) {
     if (f.maxLength !== undefined && (!Number.isInteger(f.maxLength) || (f.maxLength as number) < 1 || (f.maxLength as number) > LIMITS.textMax)) {
@@ -99,7 +102,19 @@ function checkField(raw: unknown, seen: Map<string, FieldDef>, where: string): s
     if (f.max !== undefined && (typeof f.max !== 'number' || !Number.isFinite(f.max) || f.max < f.min)) {
       return `${name}: the largest number must not be below the smallest`;
     }
-  } else if (f.min !== undefined || f.max !== undefined) return `${name} cannot have number limits`;
+    if (f.riskBands !== undefined) {
+      if (!Array.isArray(f.riskBands) || f.riskBands.length > 10) return `${name}: use at most 10 risk thresholds`;
+      const seenFrom = new Set<number>();
+      for (const band of f.riskBands as unknown[]) {
+        const b = band as { from?: unknown; points?: unknown } | null;
+        if (!b || typeof b.from !== 'number' || !Number.isFinite(b.from) || !riskPoints(b.points) || Object.keys(b).some((k) => k !== 'from' && k !== 'points')) {
+          return `${name}: every risk threshold needs a number and whole points from 0 to ${MAX_RISK_POINTS}`;
+        }
+        if (seenFrom.has(b.from)) return `${name} has two risk thresholds at ${b.from}`;
+        seenFrom.add(b.from);
+      }
+    }
+  } else if (f.min !== undefined || f.max !== undefined || f.riskBands !== undefined) return `${name} cannot have number limits`;
 
   if (f.showWhen !== undefined) {
     const when = f.showWhen as { field?: unknown; in?: unknown };
@@ -112,27 +127,9 @@ function checkField(raw: unknown, seen: Map<string, FieldDef>, where: string): s
     }
   }
 
-  const known = new Set(['key', 'label', 'hint', 'placeholder', 'optional', 'type', 'options', 'maxLength', 'min', 'max', 'showWhen']);
+  const known = new Set(['key', 'label', 'hint', 'placeholder', 'optional', 'type', 'options', 'risk', 'maxLength', 'min', 'max', 'riskBands', 'showWhen']);
   const extra = Object.keys(f).find((k) => !known.has(k));
   if (extra) return `${name} has an unknown setting “${extra}”`;
-  return null;
-}
-
-/** Checks the fields the product depends on are still there and unchanged in meaning. */
-function checkSystemField(field: FieldDef): string | null {
-  const original = DEFAULT_FIELDS.get(field.key)!;
-  const name = `“${field.label}”`;
-  if (field.type !== original.type) return `${name} is used to work out the risk and must stay “${FIELD_TYPE_LABELS[original.type]}”`;
-  if ('options' in original && 'options' in field && !sameValues(original.options, field.options)) {
-    return `The choices of ${name} are used to work out the risk and cannot be changed`;
-  }
-  if (Boolean(field.optional) !== Boolean(original.optional)) return `${name} is used to work out the risk and must stay required`;
-  if (JSON.stringify(field.showWhen ?? null) !== JSON.stringify(original.showWhen ?? null)) {
-    return `When ${name} is shown cannot be changed`;
-  }
-  if ('min' in original && 'min' in field && (field.min !== original.min || field.max !== original.max)) {
-    return `The number limits of ${name} cannot be changed`;
-  }
   return null;
 }
 
@@ -141,6 +138,8 @@ export function parseRequestForm(input: unknown): { form: RequestFormDefinition 
   if (!input || typeof input !== 'object' || !Array.isArray((input as { steps?: unknown }).steps)) {
     return { error: 'The form must have a list of steps' };
   }
+  const formExtra = Object.keys(input).find((k) => !['steps', 'titleField', 'riskLevels'].includes(k));
+  if (formExtra) return { error: `The form has an unknown setting “${formExtra}”` };
   const steps = (input as { steps: unknown[] }).steps;
   if (steps.length === 0) return { error: 'The form needs at least one step' };
   if (steps.length > LIMITS.steps) return { error: `Use at most ${LIMITS.steps} steps` };
@@ -159,16 +158,26 @@ export function parseRequestForm(input: unknown): { form: RequestFormDefinition 
       const problem = checkField(rawField, seen, `Step “${step.title}”`);
       if (problem) return { error: problem };
       const field = rawField as FieldDef;
-      if (isSystemField(field.key)) {
-        const systemProblem = checkSystemField(field);
-        if (systemProblem) return { error: systemProblem };
-      }
       seen.set(field.key, field);
     }
   }
   if (seen.size > LIMITS.fields) return { error: `Use at most ${LIMITS.fields} questions` };
-  const missing = SYSTEM_FIELD_KEYS.find((key) => !seen.has(key));
-  if (missing) return { error: `The form must keep “${DEFAULT_FIELDS.get(missing)!.label}”: it is used to work out the risk` };
+  const { titleField, riskLevels } = input as { titleField?: unknown; riskLevels?: unknown };
+  if (titleField !== undefined) {
+    const field = typeof titleField === 'string' ? seen.get(titleField) : undefined;
+    if (!field || field.type !== 'text') return { error: 'The request name must come from a short-text question in the form' };
+    if (field.optional || field.showWhen) return { error: `“${field.label}” names the request, so it must be required and always shown` };
+  }
+  if (riskLevels !== undefined) {
+    const l = riskLevels as Record<string, unknown> | null;
+    const ok =
+      !!l && typeof l === 'object' && Object.keys(l).length === 3 &&
+      [l.Medium, l.High, l.Critical].every((v) => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 200);
+    if (!ok) return { error: 'Risk levels need a whole number of points for Medium, High and Critical' };
+    if (!((l.Medium as number) < (l.High as number) && (l.High as number) < (l.Critical as number))) {
+      return { error: 'Risk levels must grow: Medium below High, High below Critical' };
+    }
+  }
   return { form: input as RequestFormDefinition };
 }
 
@@ -207,6 +216,8 @@ export function nameNewQuestions(form: RequestFormDefinition, existingKeys: Read
     renamed.set(field.key, key);
   }
   return {
+    ...form,
+    ...(form.titleField && renamed.has(form.titleField) ? { titleField: renamed.get(form.titleField)! } : {}),
     steps: form.steps.map((step) => ({
       ...step,
       fields: step.fields.map((f) => {
@@ -216,4 +227,50 @@ export function nameNewQuestions(form: RequestFormDefinition, existingKeys: Read
       }),
     })),
   };
+}
+
+/**
+ * Keeps a form consistent after an edit in the editor: when a question is removed or its
+ * choices or type change, conditions and settings that pointed at what is gone are dropped
+ * instead of leaving the admin with an error they did not cause.
+ * - a condition on a question that no longer exists or is no longer one-choice is removed;
+ * - a condition keeps only answers its question still offers;
+ * - risk settings keep only existing choices;
+ * - the request name stops pointing at a question that is gone or no longer short text.
+ * Problems the admin can fix on purpose (a condition on a later question) are left for the
+ * validator to report.
+ */
+export function repairRequestForm(form: RequestFormDefinition): RequestFormDefinition {
+  const byKey = new Map(form.steps.flatMap((s) => s.fields).map((f) => [f.key, f]));
+  const steps = form.steps.map((step) => ({
+    ...step,
+    fields: step.fields.map((field) => {
+      let next = field;
+      if (field.showWhen) {
+        const controller = byKey.get(field.showWhen.field);
+        if (!controller || (controller.type !== 'radio' && controller.type !== 'select')) {
+          const { showWhen: _removed, ...rest } = field;
+          next = rest as FieldDef;
+        } else {
+          const offered = new Set(controller.options.map((o) => o.value));
+          const kept = field.showWhen.in.filter((v) => offered.has(v));
+          if (kept.length !== field.showWhen.in.length) next = { ...field, showWhen: { ...field.showWhen, in: kept } };
+        }
+      }
+      if ('options' in next && next.risk) {
+        const offered = new Set(next.options.map((o) => o.value));
+        const entries = Object.entries(next.risk).filter(([value]) => offered.has(value));
+        if (entries.length !== Object.keys(next.risk).length) next = { ...next, risk: Object.fromEntries(entries) };
+      }
+      return next;
+    }),
+  }));
+  const title = form.titleField ? byKey.get(form.titleField) : undefined;
+  const { titleField: _title, ...rest } = form;
+  return title && title.type === 'text' ? { ...form, steps } : { ...rest, steps };
+}
+
+/** Questions whose condition points at the given question. */
+export function questionsDependingOn(form: RequestFormDefinition, key: string): FieldDef[] {
+  return form.steps.flatMap((s) => s.fields).filter((f) => f.showWhen?.field === key);
 }

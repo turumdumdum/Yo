@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_REQUEST_FORM, validateAnswers, visibleFields, type FieldDef, type RequestFormDefinition } from './requestForm';
-import { isSystemField, nameNewQuestions, newFieldKey, optionsFromLines, parseRequestForm } from './requestFormEditor';
+import { nameNewQuestions, newFieldKey, optionsFromLines, parseRequestForm, questionsDependingOn, repairRequestForm } from './requestFormEditor';
 
 const clone = (): { steps: { title: string; description?: string; fields: FieldDef[] }[] } =>
   JSON.parse(JSON.stringify(DEFAULT_REQUEST_FORM));
@@ -14,10 +14,10 @@ describe('parseRequestForm', () => {
     expect(parseRequestForm(DEFAULT_REQUEST_FORM)).toEqual({ form: DEFAULT_REQUEST_FORM });
   });
 
-  it('accepts a shorter form with renamed steps, new questions and moved system fields', () => {
+  it('accepts a form where every standard question was changed or removed', () => {
     const form = clone();
     const all = form.steps.flatMap((s) => s.fields);
-    const keep = new Set(['serviceName', 'vendorName', 'requestType', 'dataClassification', 'productionAccess', 'paymentType', 'annualCost', 'businessCriticality']);
+    const keep = new Set(['serviceName', 'dataClassification']);
     const custom: FieldDef[] = [
       { key: 'contactEmail', label: 'Vendor contact email', type: 'email', placeholder: 'sales@vendor.com' },
       { key: 'hasTrial', label: 'Did you try it?', type: 'radio', options: [{ value: 'Yes', label: 'Yes' }, { value: 'No', label: 'No' }] },
@@ -26,8 +26,23 @@ describe('parseRequestForm', () => {
     ];
     const short = {
       steps: [
-        { title: 'The basics', description: 'Two minutes.', fields: [...all.filter((f) => keep.has(f.key)).map((f) => (f.key === 'serviceName' ? { ...f, label: 'Tool name', hint: 'As the vendor calls it' } : f)), ...custom] },
+        {
+          title: 'The basics',
+          description: 'Two minutes.',
+          fields: [
+            ...all
+              .filter((f) => keep.has(f.key))
+              .map((f) =>
+                f.key === 'serviceName'
+                  ? { ...f, label: 'Tool name', hint: 'As the vendor calls it' }
+                  : { key: f.key, label: 'Is it secret?', type: 'multiselect' as const, options: [{ value: 'Yes', label: 'Yes' }], risk: { Yes: { points: 20, atLeast: 'Critical' as const } } },
+              ),
+            ...custom,
+          ],
+        },
       ],
+      titleField: 'serviceName',
+      riskLevels: { Medium: 1, High: 2, Critical: 3 },
     };
     expect(error(short)).toBeNull();
     const parsed = (parseRequestForm(short) as { form: RequestFormDefinition }).form;
@@ -40,11 +55,15 @@ describe('parseRequestForm', () => {
   });
 
   it.each([
-    [(f: ReturnType<typeof clone>) => f.steps[0]!.fields.splice(0, 1), /must keep “Service name”/],
-    [(f: ReturnType<typeof clone>) => ((f.steps[3]!.fields[0] as unknown as { type: string }).type = 'select'), /must stay “One choice \(buttons\)”/],
-    [(f: ReturnType<typeof clone>) => ((f.steps[3]!.fields[0] as unknown as { options: unknown[] }).options.pop()), /choices of “Data classification”/],
-    [(f: ReturnType<typeof clone>) => ((f.steps[0]!.fields[0] as FieldDef).optional = true), /must stay required/],
-    [(f: ReturnType<typeof clone>) => delete (f.steps[4]!.fields[1] as { showWhen?: unknown }).showWhen, /When “Estimated annual cost” is shown/],
+    [(f: ReturnType<typeof clone>) => f.steps[0]!.fields.splice(0, 1), /request name must come from a short-text question/],
+    [(f: ReturnType<typeof clone>) => ((f.steps[0]!.fields[0] as FieldDef).optional = true), /names the request, so it must be required/],
+    [(f: ReturnType<typeof clone>) => ((f.steps[3]!.fields[0] as unknown as { options: unknown[] }).options.pop()), /mention “Restricted”, which is not one of its choices/],
+    [(f: ReturnType<typeof clone>) => ((f.steps[3]!.fields[0] as unknown as { risk: unknown }).risk = { Public: { points: 99 } }), /whole number from 0 to 20/],
+    [(f: ReturnType<typeof clone>) => ((f.steps[3]!.fields[0] as unknown as { risk: unknown }).risk = { Public: { atLeast: 'Huge' } }), /minimum risk level is unknown/],
+    [(f: ReturnType<typeof clone>) => ((f.steps[4]!.fields[1] as unknown as { riskBands: unknown }).riskBands = [{ from: 'a', points: 1 }]), /every risk threshold/],
+    [(f: ReturnType<typeof clone>) => ((f.steps[0]!.fields[0] as unknown as { risk: unknown }).risk = {}), /cannot have choices/],
+    [(f: ReturnType<typeof clone>) => ((f as { riskLevels?: unknown }).riskLevels = { Medium: 5, High: 4, Critical: 9 }), /must grow/],
+    [(f: ReturnType<typeof clone>) => ((f as { extra?: unknown }).extra = 1), /unknown setting “extra”/],
     [(f: ReturnType<typeof clone>) => (f.steps = []), /at least one step/],
     [(f: ReturnType<typeof clone>) => (f.steps[0]!.title = ' '), /needs a title/],
     [(f: ReturnType<typeof clone>) => f.steps.push({ title: 'Empty', fields: [] }), /has no questions/],
@@ -65,6 +84,14 @@ describe('parseRequestForm', () => {
     expect(error(form)).toMatch(message);
   });
 
+  it('lets any short-text question name the request', () => {
+    const form = { steps: [{ title: 'S', fields: [{ key: 'tool', label: 'Tool', type: 'text' }] }], titleField: 'tool' };
+    expect(error(form)).toBeNull();
+    expect(error({ ...form, titleField: 'missing' })).toMatch(/request name/);
+    // Without titleField a form simply has no request name unless it keeps serviceName.
+    expect(error({ steps: form.steps })).toBeNull();
+  });
+
   it('rejects things that are not forms', () => {
     expect(error(null)).toMatch(/list of steps/);
     expect(error({ steps: 'x' })).toMatch(/list of steps/);
@@ -73,11 +100,6 @@ describe('parseRequestForm', () => {
 });
 
 describe('helpers', () => {
-  it('marks the fields the product relies on', () => {
-    expect(isSystemField('dataClassification')).toBe(true);
-    expect(isSystemField('purpose')).toBe(false);
-  });
-
   it('derives unique keys from labels', () => {
     expect(newFieldKey('Vendor contact email', new Set())).toBe('vendorContactEmail');
     expect(newFieldKey('Vendor contact email', new Set(['vendorContactEmail']))).toBe('vendorContactEmail2');
@@ -114,3 +136,45 @@ describe('nameNewQuestions', () => {
     expect(nameNewQuestions(form, new Set(['serviceName', 'newQuestion', 'newQuestion2', 'newQuestion3']))).toEqual(form);
   });
 });
+
+describe('repairRequestForm', () => {
+  const yesNo = [
+    { value: 'Yes', label: 'Yes' },
+    { value: 'No', label: 'No' },
+  ];
+  const form: RequestFormDefinition = {
+    titleField: 'tool',
+    steps: [
+      {
+        title: 'S',
+        fields: [
+          { key: 'tool', label: 'Tool', type: 'text' },
+          { key: 'paid', label: 'Paid?', type: 'radio', options: yesNo, risk: { Yes: { points: 1 }, No: { points: 0 } } },
+          { key: 'cost', label: 'Cost', type: 'money', min: 0, showWhen: { field: 'paid', in: ['Yes', 'No'] } },
+        ],
+      },
+    ],
+  };
+
+  it('leaves a consistent form alone', () => {
+    expect(repairRequestForm(form)).toEqual(form);
+    expect(questionsDependingOn(form, 'paid').map((f) => f.key)).toEqual(['cost']);
+  });
+
+  it('drops conditions, risk settings and the request name that point at what is gone', () => {
+    const withoutPaid = { ...form, steps: [{ ...form.steps[0]!, fields: [form.steps[0]!.fields[0]!, form.steps[0]!.fields[2]!] }] };
+    expect(repairRequestForm(withoutPaid).steps[0]!.fields[1]!.showWhen).toBeUndefined();
+
+    const fewerChoices = copyWith(form, 1, { ...form.steps[0]!.fields[1]!, options: [yesNo[0]!] } as FieldDef);
+    const repaired = repairRequestForm(fewerChoices);
+    expect(repaired.steps[0]!.fields[2]!.showWhen).toEqual({ field: 'paid', in: ['Yes'] });
+    expect((repaired.steps[0]!.fields[1] as { risk?: unknown }).risk).toEqual({ Yes: { points: 1 } });
+
+    const titleIsLongText = copyWith(form, 0, { key: 'tool', label: 'Tool', type: 'textarea' });
+    expect(repairRequestForm(titleIsLongText).titleField).toBeUndefined();
+  });
+});
+
+function copyWith(form: RequestFormDefinition, index: number, field: FieldDef): RequestFormDefinition {
+  return { ...form, steps: [{ ...form.steps[0]!, fields: form.steps[0]!.fields.map((f, i) => (i === index ? field : f)) }] };
+}

@@ -10,7 +10,7 @@ Open-source vendor intake and due-diligence service. A requester submits a reque
 | --- | --- |
 | Sign-in | Email + password with mandatory TOTP, enforced in the database. Google sign-in is not configured yet |
 | Organizations | Create an organization, roles, one organization per self-hosted installation |
-| Request form | The standard 7-step form or the organization's own forms (built in Admin, several can be saved, one is in use); autosave, conditional questions, server-side validation, attachments and automatic risk tier |
+| Request form | The standard 7-step form or the organization's own forms (built in Admin, every question editable including how answers affect the risk; several can be saved, one is in use); autosave, conditional questions, server-side validation, attachments and automatic risk tier |
 | Triage and stages | Submission starts the default review stages required by the risk tier, each with an SLA due date |
 | Reviews | Reviewer assignment, per-stage checklist and relevant answers, configurable review forms (a full security review form by default, with certification rules), approve / approve with conditions / reject, automatic final decision, review queue |
 | Questions | A reviewer asks the requester inside a stage; the stage waits and its SLA clock pauses until the answer |

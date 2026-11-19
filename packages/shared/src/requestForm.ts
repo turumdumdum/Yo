@@ -4,10 +4,9 @@ import {
   DATA_CLASSIFICATIONS,
   PAYMENT_TYPES,
   REQUEST_TYPES,
-  type BusinessCriticality,
   type DataClassification,
+  type RiskTier,
 } from './domain';
-import type { RiskInput } from './risk';
 
 // The request form (CLAUDE.md §5), described as data. The same definition drives the form
 // UI, server-side validation and the answer summary, so a field is declared once.
@@ -39,12 +38,28 @@ interface FieldBase {
   showWhen?: { field: string; in: readonly string[] };
 }
 
+/** How choosing an option affects the risk tier. */
+export interface OptionRisk {
+  /** Points added to the risk score. */
+  points?: number;
+  /** The tier is never lower than this when the option is chosen. */
+  atLeast?: RiskTier;
+}
+
+/** Points added when a number reaches `from`; the highest band reached applies. */
+export interface RiskBand {
+  from: number;
+  points: number;
+}
+
+/** Minimum score for each tier; below Medium the tier is Low. */
+export type RiskLevels = Record<Exclude<RiskTier, 'Low'>, number>;
+
 export type FieldDef = FieldBase &
   (
     | { type: 'text' | 'textarea' | 'url' | 'email' | 'phone' | 'date'; maxLength?: number }
-    | { type: 'integer' | 'money'; min: number; max?: number }
-    | { type: 'select' | 'radio'; options: readonly Option[] }
-    | { type: 'multiselect'; options: readonly Option[] }
+    | { type: 'integer' | 'money'; min: number; max?: number; riskBands?: readonly RiskBand[] }
+    | { type: 'select' | 'radio' | 'multiselect'; options: readonly Option[]; risk?: Readonly<Record<string, OptionRisk>> }
     | { type: 'owner' }
   );
 
@@ -59,6 +74,10 @@ export interface StepDef {
 
 export interface RequestFormDefinition {
   steps: readonly StepDef[];
+  /** Key of the short-text question whose answer names the request. Defaults to serviceName. */
+  titleField?: string;
+  /** Risk score needed for each tier; see risk.ts. */
+  riskLevels?: RiskLevels;
 }
 
 const options = (values: readonly string[]): Option[] => values.map((value) => ({ value, label: value }));
@@ -160,7 +179,13 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
     title: 'Data',
     description: 'What data the vendor will see. If unsure, choose the higher classification.',
     fields: [
-      { key: 'dataClassification', label: 'Data classification', type: 'radio', options: options(DATA_CLASSIFICATIONS) },
+      {
+        key: 'dataClassification',
+        label: 'Data classification',
+        type: 'radio',
+        options: options(DATA_CLASSIFICATIONS),
+        risk: { Internal: { points: 1 }, Confidential: { points: 3 }, Restricted: { points: 5, atLeast: 'High' } },
+      },
       {
         key: 'personalData',
         label: 'Personal data involved?',
@@ -176,7 +201,7 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
         showWhen: { field: 'personalData', in: ['Yes'] },
       },
       { key: 'dataLocation', label: 'Data location', type: 'text', hint: 'Where the vendor stores and processes the data.' },
-      { key: 'productionAccess', label: 'Access to production systems?', type: 'radio', options: YES_NO },
+      { key: 'productionAccess', label: 'Access to production systems?', type: 'radio', options: YES_NO, risk: { Yes: { points: 2 } } },
     ],
   },
   {
@@ -184,7 +209,18 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
     description: 'What it costs and how the contract runs.',
     fields: [
       { key: 'paymentType', label: 'Paid or free', type: 'radio', options: options(PAYMENT_TYPES) },
-      { key: 'annualCost', label: 'Estimated annual cost', type: 'money', min: 0, showWhen: whenPaid },
+      {
+        key: 'annualCost',
+        label: 'Estimated annual cost',
+        type: 'money',
+        min: 0,
+        showWhen: whenPaid,
+        riskBands: [
+          { from: 10_000, points: 1 },
+          { from: 50_000, points: 2 },
+          { from: 250_000, points: 3 },
+        ],
+      },
       { key: 'currency', label: 'Currency', type: 'select', options: options(CURRENCIES), showWhen: whenPaid },
       { key: 'contractTermMonths', label: 'Contract term (months)', type: 'integer', min: 1, showWhen: whenPaid },
       { key: 'autoRenewal', label: 'Auto-renewal', type: 'radio', options: YES_NO, showWhen: whenPaid },
@@ -211,29 +247,19 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
         type: 'radio',
         options: options(BUSINESS_CRITICALITIES),
         hint: 'How badly would the business be affected if this service stopped working?',
+        risk: { Medium: { points: 1 }, High: { points: 2 }, Critical: { points: 4, atLeast: 'High' } },
       },
     ],
   },
 ];
 
 /** The standard form every organization starts with. */
-export const DEFAULT_REQUEST_FORM: RequestFormDefinition = { steps: REQUEST_FORM_STEPS };
+export const DEFAULT_REQUEST_FORM: RequestFormDefinition = { steps: REQUEST_FORM_STEPS, titleField: 'serviceName' };
 
-/**
- * Fields the product relies on: the request title, triage (risk tier), stage rules and
- * reports. A custom form must keep them with the same type and choices; their wording,
- * help text, step and position can change.
- */
-export const SYSTEM_FIELD_KEYS = [
-  'serviceName',
-  'vendorName',
-  'requestType',
-  'dataClassification',
-  'productionAccess',
-  'paymentType',
-  'annualCost',
-  'businessCriticality',
-] as const;
+/** Key of the question that names a request. */
+export function titleFieldKey(form: RequestFormDefinition = DEFAULT_REQUEST_FORM): string {
+  return form.titleField ?? 'serviceName';
+}
 
 const TEXT_MAX = 200;
 const TEXTAREA_MAX = 2000;
@@ -435,18 +461,8 @@ export function formatAnswer(field: FieldDef, value: unknown): string {
   }
 }
 
-/** Triage input from validated answers. The cost is taken as entered; currency conversion is not designed yet. */
-export function riskInputFromAnswers(cleaned: Answers): RiskInput {
-  return {
-    dataClassification: cleaned.dataClassification as DataClassification,
-    businessCriticality: cleaned.businessCriticality as BusinessCriticality,
-    productionAccess: cleaned.productionAccess === 'Yes',
-    annualCost: cleaned.paymentType === 'Paid' && typeof cleaned.annualCost === 'number' ? cleaned.annualCost : null,
-  };
-}
-
 /** Rule-based completeness hints for the review step. They never block submission. */
-export function completenessHints(answers: Answers): string[] {
+export function completenessHints(answers: Answers, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): string[] {
   const hints: string[] = [];
   const classification = answers.dataClassification;
   if (classification === 'Confidential' || classification === 'Restricted') {
@@ -464,7 +480,8 @@ export function completenessHints(answers: Answers): string[] {
   if (answers.signInMethod === 'Shared account') {
     hints.push('Shared accounts are hard to audit. Ask the vendor whether SSO or individual accounts are available.');
   }
-  if (typeof answers.alternatives !== 'string' || answers.alternatives.trim() === '') {
+  const asksAlternatives = form.steps.some((step) => step.fields.some((f) => f.key === 'alternatives'));
+  if (asksAlternatives && (typeof answers.alternatives !== 'string' || answers.alternatives.trim() === '')) {
     hints.push('Listing the alternatives you considered speeds up the review.');
   }
   return hints;
