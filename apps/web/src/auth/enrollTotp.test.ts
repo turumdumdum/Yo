@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { enrollTotp } from './enrollTotp';
+import { enrollTotp, isFactorGone } from './enrollTotp';
 
 function fakeMfa(factors: { id: string; factor_type: string; status: string }[]) {
   const calls: string[] = [];
@@ -41,5 +41,14 @@ describe('enrollTotp', () => {
     await enrollTotp(mfa, new Date('2026-11-14T10:00:00.000Z'));
     await enrollTotp(mfa, new Date('2026-11-14T10:00:00.001Z'));
     expect(names).toEqual(['Authenticator app 2026-11-14T10:00:00.000Z', 'Authenticator app 2026-11-14T10:00:00.001Z']);
+  });
+});
+
+describe('isFactorGone', () => {
+  it('recognizes the error Supabase gives for a factor that was removed', () => {
+    expect(isFactorGone({ code: 'mfa_factor_not_found', message: 'Factor not found' })).toBe(true);
+    expect(isFactorGone(new Error('Factor not found'))).toBe(true);
+    expect(isFactorGone({ code: 'mfa_verification_failed', message: 'Invalid TOTP code entered' })).toBe(false);
+    expect(isFactorGone(null)).toBe(false);
   });
 });

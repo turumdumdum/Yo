@@ -27,3 +27,15 @@ export async function enrollTotp(mfa: MfaApi, now: Date = new Date()): Promise<E
   if (error) throw error;
   return { factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret };
 }
+
+/**
+ * True when Supabase no longer knows the factor being verified. That happens when the
+ * setup was opened again in another tab or window (for example from the confirmation
+ * email after an invitation): each setup removes unfinished ones, so the older QR code
+ * stops working.
+ */
+export function isFactorGone(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { code?: unknown; status?: unknown; message?: unknown };
+  return e.code === 'mfa_factor_not_found' || (typeof e.message === 'string' && /factor not found/i.test(e.message));
+}
