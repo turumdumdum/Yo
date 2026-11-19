@@ -53,12 +53,12 @@ The decisions behind this layout are in [CLAUDE.md](../CLAUDE.md) §3 and §8. T
 ## Members and invitations
 
 - Nobody inserts memberships directly. `create_invitation` (org admin) returns a one-time token and stores only its SHA-256 hash; `accept_invitation` makes the signed-in account a member if its email matches, the invitation is unused and not older than 7 days.
-- Email is not sent yet: the admin copies the link. The web app moves the token from the URL into local storage and exchanges it after sign-in and two-step verification.
+- Invitations are created through `POST /v1/invitations`: the API calls `create_invitations` with the admin's own token (so the database still checks the role, MFA and domains) and emails each link through the `Mailer` adapter (`apps/api/src/email.ts`): Resend over HTTP (Workers and Node), any SMTP server through nodemailer (Node only, `apps/api/src/smtp.ts`), or `log` for development. Without `EMAIL_PROVIDER`, or when a send fails, the link is returned to the admin to share by hand; a link that was emailed is not returned. "Send again" issues a new invitation, which replaces the old one. The web app moves the token from the URL into local storage and exchanges it after sign-in and two-step verification.
 - `memberships.email` is copied from the account at insert time so that colleagues can be shown by email.
 
 ## Bulk invitations and allowed domains
 
-- `create_invitations` takes up to 500 `{email, role}` rows; each row succeeds or fails on its own (invalid email, unknown role, listed twice, already a member, domain not allowed) and the result lists a token or an error per row. The web app parses CSV (comma or semicolon, with or without a header) and JSON with `parseInviteImport` in `packages/shared/src/inviteImport.ts`, shows skipped rows with their line, and offers the links as a CSV download. Emails are still not sent.
+- `create_invitations` takes up to 500 `{email, role}` rows; each row succeeds or fails on its own (invalid email, unknown role, listed twice, already a member, domain not allowed) and the result lists a token or an error per row. The web app parses CSV (comma or semicolon, with or without a header) and JSON with `parseInviteImport` in `packages/shared/src/inviteImport.ts`, shows skipped rows with their line, and sends them through the same API; links that could not be emailed are offered as a CSV download.
 - `verified_domains` holds the organization's email domains. With `restrict_to_verified_domains` on, invitations to other domains are refused and accepting an older invitation to another domain fails. The restriction cannot be turned on without a domain, and the last domain cannot be removed while it is on. Subdomains are separate domains. Domain changes and the switch are audited.
 - Restricting needs no proof of ownership because it only narrows who can join. Joining automatically by domain is not built; it will require `verified_at`, set by the backend after a DNS check.
 
@@ -101,7 +101,14 @@ CLAUDE.md §2 applies: the core works without AI, the plugin is off by default a
 
 ## Risk tier
 
-`computeRiskTier` scores a request from data classification, business criticality, production access and annual cost, then applies minimum-tier floors. The scoring configuration is a plain object so it can later be stored per organization and edited in the workflow builder. The default weights are a proposal and have not been approved as policy.
+`computeRisk` (`packages/shared/src/risk.ts`) adds up the risk points the request form assigns to the answers and applies minimum tiers; see "Request forms". The default weights are a proposal and have not been approved as policy.
+
+## Confidential requests
+
+- A form names a one-choice question (`confidential`) whose answers make a request confidential, and a person question for the business owner (`businessOwnerField`). The standard form asks "Keep this request confidential?".
+- At submit the API first records `requests.is_confidential` and the business owner (`set_request_confidentiality`, service role, draft only), then submits, so a confidential request is never visible without its restriction. The business owner is matched to a member by email; a name that is not a member's email grants nothing, and the admin is told.
+- A confidential request is visible to the requester, org admins, the rows in `request_viewers` (business owner, people an org admin added) and reviewers assigned to its stages. Process managers and auditors do not see it: the `requests` policies check `is_confidential`, and functions that let managers act on any request (`reviewable_stage`, `assign_stage_reviewer`, `request_review_answers`, `register_attachment`) use `private.oversees_request`. Stages, questions and attachments follow the request's own visibility. Only org admins can therefore assign reviewers to a confidential request.
+- Org admins switch confidentiality and manage viewers with `set_request_confidential`, `add_request_viewer` and `remove_request_viewer`; each change is audited. The business owner is recorded on every request, so they can follow non-confidential requests too.
 
 ## Decisions recorded on 2026-11-14
 

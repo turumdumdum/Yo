@@ -35,12 +35,19 @@ describe('supabaseRequestStore', () => {
 
   it('submits through the service-role RPC', async () => {
     const { impl, calls } = fakeFetch(200, { id: ID, status: 'in_review', risk_tier: 'Low', risk_score: 0, risk_reasons: [], submitted_at: 'now' });
-    await supabaseRequestStore(config, impl).submit(ID, { serviceName: 'A' }, { tier: 'Low', score: 0, reasons: [] }, [
-      { name: 'License check', status: 'In review', slaBusinessDays: 5, slaDueAt: '2026-11-20T15:30:00.000Z', note: null, checklist: ['Terms ok'], reviewFields: [], reviewRules: [] },
-    ]);
-    expect(calls[0]!.url).toBe('https://project.supabase.co/rest/v1/rpc/submit_request');
-    expect((calls[0]!.init!.headers as Record<string, string>).apikey).toBe('secret-key');
-    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({
+    await supabaseRequestStore(config, impl).submit(
+      ID,
+      { serviceName: 'A' },
+      { tier: 'Low', score: 0, reasons: [] },
+      [{ name: 'License check', status: 'In review', slaBusinessDays: 5, slaDueAt: '2026-11-20T15:30:00.000Z', note: null, checklist: ['Terms ok'], reviewFields: [], reviewRules: [] }],
+      { confidential: true, businessOwnerEmail: 'bo@acme.example' },
+    );
+    // Visibility first, so the request is never visible without it.
+    expect(calls[0]!.url).toBe('https://project.supabase.co/rest/v1/rpc/set_request_confidentiality');
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ p_request_id: ID, p_confidential: true, p_business_owner_email: 'bo@acme.example' });
+    expect(calls[1]!.url).toBe('https://project.supabase.co/rest/v1/rpc/submit_request');
+    expect((calls[1]!.init!.headers as Record<string, string>).apikey).toBe('secret-key');
+    expect(JSON.parse(calls[1]!.init!.body as string)).toEqual({
       p_request_id: ID,
       p_answers: { serviceName: 'A' },
       p_risk_tier: 'Low',

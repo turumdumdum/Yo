@@ -14,7 +14,7 @@ import { Field } from '../components/Field';
 import { FormError } from '../components/FormError';
 import { downloadText } from '../lib/download';
 import { errorMessage } from '../lib/errors';
-import { createInvitation, createInvitations, type BulkInvitationResult } from './api';
+import { sendInvitations, type InvitationOutcome } from './api';
 
 interface Props {
   supabase: SupabaseClient;
@@ -25,7 +25,6 @@ interface Props {
 }
 
 const MAX_FILE_BYTES = 1_000_000;
-const linkFor = (token: string) => `${window.location.origin}/?invite=${token}`;
 
 function RoleSelect({ id, value, onChange }: { id: string; value: OrgRole; onChange: (role: OrgRole) => void }) {
   return (
@@ -39,7 +38,7 @@ function RoleSelect({ id, value, onChange }: { id: string; value: OrgRole; onCha
   );
 }
 
-/** Invite one person, or many at once from CSV or JSON. Emails are not sent yet: links are handed out. */
+/** Invite one person, or many at once from CSV or JSON. Each person gets an email; without email, the admin gets links. */
 export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Props) {
   const [mode, setMode] = useState<'one' | 'many'>('one');
   const [error, setError] = useState<string | null>(null);
@@ -49,14 +48,14 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<OrgRole>('requester');
   const [emailError, setEmailError] = useState<string>();
-  const [link, setLink] = useState<{ email: string; url: string } | null>(null);
+  const [single, setSingle] = useState<InvitationOutcome | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Many people
   const [text, setText] = useState('');
   const [defaultRole, setDefaultRole] = useState<OrgRole>('requester');
   const [preview, setPreview] = useState<InviteImportResult | null>(null);
-  const [results, setResults] = useState<BulkInvitationResult[] | null>(null);
+  const [results, setResults] = useState<InvitationOutcome[] | null>(null);
 
   const outsideDomains = (address: string) =>
     allowedDomains !== null && !allowedDomains.includes(address.slice(address.lastIndexOf('@') + 1));
@@ -73,8 +72,12 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
     setBusy(true);
     setError(null);
     try {
-      const token = await createInvitation(supabase, orgId, parsed.data.email, parsed.data.role);
-      setLink({ email: parsed.data.email, url: linkFor(token) });
+      const [outcome] = await sendInvitations(supabase, [{ email: parsed.data.email, role: parsed.data.role }]);
+      if (outcome?.error) {
+        setError(`${parsed.data.email}: ${outcome.error}`);
+        return;
+      }
+      setSingle(outcome ?? null);
       setEmail('');
       await onChanged();
     } catch (e) {
@@ -85,9 +88,9 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
   }
 
   async function copyLink() {
-    if (!link) return;
+    if (!single?.link) return;
     try {
-      await navigator.clipboard.writeText(link.url);
+      await navigator.clipboard.writeText(single.link);
       setCopied(true);
     } catch {
       setError('Could not copy. Select the link and copy it manually.');
@@ -113,7 +116,7 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
     setBusy(true);
     setError(null);
     try {
-      setResults(await createInvitations(supabase, orgId, preview.rows));
+      setResults(await sendInvitations(supabase, preview.rows));
       setPreview(null);
       setText('');
       await onChanged();
@@ -124,8 +127,9 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
     }
   }
 
-  const created = (results ?? []).filter((r): r is Extract<BulkInvitationResult, { token: string }> => 'token' in r);
-  const failed = (results ?? []).filter((r): r is Extract<BulkInvitationResult, { error: string }> => 'error' in r);
+  const emailed = (results ?? []).filter((r) => r.emailed);
+  const unsent = (results ?? []).filter((r) => r.link);
+  const failed = (results ?? []).filter((r) => r.error);
   const outside = preview?.rows.filter((r) => outsideDomains(r.email)) ?? [];
 
   return (
@@ -140,8 +144,8 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
         </button>
       </div>
       <p className="field-hint">
-        Emails are not sent yet: you get a link per person to pass on. Each link works once, for 7 days, and only for an
-        account with that email address.
+        Each person gets an email with a link to join. The link works once, for 7 days, and only for an account with that email
+        address. If an email cannot be sent, you get the link to pass on yourself.
         {allowedDomains && ` Only addresses at ${allowedDomains.join(', ')} can be invited.`}
       </p>
       <FormError message={error} />
@@ -155,16 +159,22 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
               <RoleSelect id="invite-role" value={role} onChange={setRole} />
             </div>
             <button type="submit" className="button" disabled={busy}>
-              Create invitation
+              {busy ? 'Sending…' : 'Send invitation'}
             </button>
           </form>
-          {link && (
+          {single?.emailed && (
+            <p className="notice notice-approved" role="status">
+              Invitation sent to <strong>{single.email}</strong>. They join by clicking the link in the email.
+            </p>
+          )}
+          {single?.link && (
             <div className="notice" role="status">
               <p>
-                Invitation for <strong>{link.email}</strong> created. Copy the link and send it. It is not shown again.
+                Invitation for <strong>{single.email}</strong> created, but the email was not sent ({single.emailError}). Copy the
+                link and send it yourself. It is not shown again.
               </p>
               <p>
-                <code className="secret">{link.url}</code>
+                <code className="secret">{single.link}</code>
               </p>
               <button type="button" className="button button-secondary button-small" onClick={() => void copyLink()}>
                 {copied ? 'Copied' : 'Copy link'}
@@ -269,7 +279,7 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
                   </table>
                   {preview.rows.length > 20 && <p className="field-hint">and {preview.rows.length - 20} more.</p>}
                   <button type="button" className="button" disabled={busy} onClick={() => void createMany()}>
-                    {busy ? 'Creating…' : `Create ${preview.rows.length} ${preview.rows.length === 1 ? 'invitation' : 'invitations'}`}
+                    {busy ? 'Sending…' : `Send ${preview.rows.length} ${preview.rows.length === 1 ? 'invitation' : 'invitations'}`}
                   </button>
                 </>
               )}
@@ -279,8 +289,10 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
           {results && (
             <div className="notice" role="status">
               <p>
-                <strong>{created.length}</strong> {created.length === 1 ? 'invitation' : 'invitations'} created
-                {failed.length > 0 && `, ${failed.length} refused`}. Download the links now: they are not shown again.
+                <strong>{emailed.length}</strong> {emailed.length === 1 ? 'invitation' : 'invitations'} sent by email
+                {unsent.length > 0 && `, ${unsent.length} created without email (${unsent[0]!.emailError})`}
+                {failed.length > 0 && `, ${failed.length} refused`}.
+                {unsent.length > 0 && ' Download their links now: they are not shown again.'}
               </p>
               {failed.length > 0 && (
                 <ul className="plain-list problems">
@@ -291,14 +303,14 @@ export function InviteSection({ supabase, orgId, allowedDomains, onChanged }: Pr
                   ))}
                 </ul>
               )}
-              {created.length > 0 && (
+              {unsent.length > 0 && (
                 <button
                   type="button"
                   className="button button-small"
                   onClick={() =>
                     downloadText(
                       'invitation-links.csv',
-                      invitationLinksCsv(created.map((r) => ({ email: r.email, role: r.role, url: linkFor(r.token) }))),
+                      invitationLinksCsv(unsent.map((r) => ({ email: r.email, role: r.role, url: r.link! }))),
                     )
                   }
                 >

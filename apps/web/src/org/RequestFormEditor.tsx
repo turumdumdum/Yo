@@ -530,6 +530,9 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
   const levels = draft.definition.riskLevels ?? DEFAULT_RISK_LEVELS;
   const titleKey = draft.definition.titleField ?? (allQuestions(draft.definition).some((f) => f.key === 'serviceName' && f.type === 'text') ? titleFieldKey(draft.definition) : undefined);
   const textQuestions = allQuestions(draft.definition).filter((f) => f.type === 'text');
+  const oneChoiceQuestions = allQuestions(draft.definition).filter((f) => f.type === 'radio' || f.type === 'select');
+  const ownerQuestions = allQuestions(draft.definition).filter((f) => f.type === 'owner');
+  const confidentialQuestion = oneChoiceQuestions.find((f) => f.key === draft.definition.confidential?.field);
 
   function setDefinition(next: RequestFormDefinition) {
     setDraft((d) => ({ ...d, definition: repairRequestForm(next) }));
@@ -629,7 +632,7 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
       </div>
 
       <details className="form-settings">
-        <summary>Form settings: request name and risk levels</summary>
+        <summary>Form settings: request name, confidentiality and risk levels</summary>
         <div className="editor-row">
           <div className="field">
             <label htmlFor="form-title-field">Which answer names the request?</label>
@@ -649,6 +652,64 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
             ) : (
               <p className="field-hint">Add a short-text question, for example “Service name”, to name requests in lists.</p>
             )}
+          </div>
+        </div>
+        <div className="editor-row">
+          <div className="field">
+            <label htmlFor="form-confidential-field">Which answer keeps a request confidential?</label>
+            <select
+              id="form-confidential-field"
+              value={draft.definition.confidential?.field ?? ''}
+              onChange={(e) => {
+                const { confidential: _old, ...rest } = draft.definition;
+                setDefinition(e.target.value ? { ...rest, confidential: { field: e.target.value, in: [] } } : rest);
+              }}
+            >
+              <option value="">No question (requests are never confidential)</option>
+              {oneChoiceQuestions.map((f) => (
+                <option key={f.key} value={f.key}>
+                  {f.label || 'Untitled question'}
+                </option>
+              ))}
+            </select>
+            {confidentialQuestion && 'options' in confidentialQuestion && (
+              <div className="choices" role="group" aria-label="Answers that make it confidential">
+                {confidentialQuestion.options.map((o) => (
+                  <label key={o.value} className="choice">
+                    <input
+                      type="checkbox"
+                      checked={draft.definition.confidential!.in.includes(o.value)}
+                      onChange={(e) => {
+                        const current = draft.definition.confidential!.in;
+                        const next = e.target.checked ? [...current, o.value] : current.filter((v) => v !== o.value);
+                        setDefinition({ ...draft.definition, confidential: { field: confidentialQuestion.key, in: next } });
+                      }}
+                    />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
+            )}
+            <p className="field-hint">A confidential request is seen only by the requester, org admins, the business owner and people an admin adds.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="form-owner-field">Who is the business owner?</label>
+            <select
+              id="form-owner-field"
+              value={draft.definition.businessOwnerField ?? ''}
+              onChange={(e) => {
+                const { businessOwnerField: _old, ...rest } = draft.definition;
+                setDefinition(e.target.value ? { ...rest, businessOwnerField: e.target.value } : rest);
+              }}
+            >
+              <option value="">No question</option>
+              {ownerQuestions.map((f) => (
+                <option key={f.key} value={f.key}>
+                  {f.label || 'Untitled question'}
+                </option>
+              ))}
+            </select>
+            <p className="field-hint">When the answer is a member’s email, that person can see the request.</p>
           </div>
         </div>
         <fieldset className="field">

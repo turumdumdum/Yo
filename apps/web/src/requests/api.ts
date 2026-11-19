@@ -28,14 +28,18 @@ export interface RequestRow {
   /** The form the request was started with; null for the standard form. */
   form: RequestFormDefinition | null;
   requester_id: string;
+  /** Visible only to the requester, org admins, the business owner and added viewers. */
+  is_confidential: boolean;
   created_at: string;
   updated_at: string;
   submitted_at: string | null;
 }
 
-const LIST_COLUMNS = 'id,status,service_name,request_type,risk_tier,requester_id,created_at,updated_at,submitted_at,request_stages(status)';
+const LIST_COLUMNS = 'id,status,service_name,vendor_name:answers->>vendorName,request_type,risk_tier,requester_id,is_confidential,created_at,updated_at,submitted_at,request_stages(status)';
 
 export type RequestSummary = Omit<RequestRow, 'answers' | 'risk_score' | 'risk_reasons' | 'form'> & {
+  /** The vendor answer, when the form asks for it. */
+  vendor_name?: string | null;
   /** Statuses of the review stages, for progress in lists. */
   request_stages?: { status: StageStatus }[];
 };
@@ -230,7 +234,7 @@ export class SubmitError extends Error {
   }
 }
 
-async function callApi(
+export async function callApi(
   supabase: SupabaseClient,
   path: string,
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
@@ -257,7 +261,7 @@ async function callApi(
   }
 }
 
-async function apiError(res: Response, fallback: string): Promise<SubmitError> {
+export async function apiError(res: Response, fallback: string): Promise<SubmitError> {
   const body = (await res.json().catch(() => null)) as { error?: string; fields?: Record<string, string> } | null;
   return new SubmitError(body?.error ?? fallback, body?.fields);
 }
@@ -405,4 +409,32 @@ export async function deleteRequestForm(supabase: SupabaseClient, id: string): P
 export async function activateRequestForm(supabase: SupabaseClient, id: string | null): Promise<void> {
   const res = await callApi(supabase, `/v1/request-forms/${id ?? 'standard'}/activate`, 'POST');
   if (!res.ok) throw await apiError(res, 'The form could not be made active.');
+}
+
+export interface RequestViewer {
+  user_id: string;
+  /** business_owner: matched from the answers; added: by an org admin. */
+  reason: 'business_owner' | 'added';
+}
+
+/** Who may see a confidential request besides the requester and org admins. RLS decides what is listed. */
+export async function listViewers(supabase: SupabaseClient, requestId: string): Promise<RequestViewer[]> {
+  const { data, error } = await supabase.from('request_viewers').select('user_id,reason').eq('request_id', requestId).order('created_at');
+  if (error) throw error;
+  return data as RequestViewer[];
+}
+
+export async function addViewer(supabase: SupabaseClient, requestId: string, userId: string): Promise<void> {
+  const { error } = await supabase.rpc('add_request_viewer', { p_request_id: requestId, p_user_id: userId });
+  if (error) throw error;
+}
+
+export async function removeViewer(supabase: SupabaseClient, requestId: string, userId: string): Promise<void> {
+  const { error } = await supabase.rpc('remove_request_viewer', { p_request_id: requestId, p_user_id: userId });
+  if (error) throw error;
+}
+
+export async function setConfidential(supabase: SupabaseClient, requestId: string, confidential: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_request_confidential', { p_request_id: requestId, p_confidential: confidential });
+  if (error) throw error;
 }

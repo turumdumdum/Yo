@@ -9,6 +9,7 @@ import {
   listInvitations,
   removeMember,
   revokeInvitation,
+  sendInvitations,
   setAllowSelfReview,
   type Domain,
   type Invitation,
@@ -46,6 +47,7 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<OrgRole | ''>('');
@@ -69,11 +71,13 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
     await Promise.all([onChanged(), reloadLocal()]);
   }, [onChanged, reloadLocal]);
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>, done?: string) {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       await action();
+      if (done) setNotice(done);
       await reloadAll();
     } catch (e) {
       setError(errorMessage(e));
@@ -105,6 +109,11 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
       </nav>
       <div className="admin-content">
         <FormError message={error} />
+        {notice && (
+          <p className="notice notice-approved" role="status">
+            {notice}
+          </p>
+        )}
         {section === 'people' && (
           <>
             <section className="card" aria-labelledby="members-heading">
@@ -199,6 +208,21 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
                           ? 'expired'
                           : `expires ${formatDate(invitation.expires_at)}`}
                       </span>
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        disabled={busy}
+                        aria-label={`Send the invitation for ${invitation.email} again`}
+                        onClick={() =>
+                          void run(async () => {
+                            const [outcome] = await sendInvitations(supabase, [{ email: invitation.email, role: invitation.role }]);
+                            if (outcome?.error) throw new Error(outcome.error);
+                            if (outcome?.link) throw new Error(`The email was not sent (${outcome.emailError}). Use “Invite people” to get a link to share.`);
+                          }, `A new invitation email is on its way to ${invitation.email}. The earlier link no longer works.`)
+                        }
+                      >
+                        Send again
+                      </button>
                       <button
                         type="button"
                         className="button button-secondary button-small"

@@ -16,6 +16,8 @@ export interface Caller {
   userId: string;
   orgId: string;
   role: OrgRole;
+  /** The caller's email address, when Supabase reports one. */
+  email?: string;
 }
 
 export interface AdminStore {

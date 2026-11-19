@@ -78,6 +78,10 @@ export interface RequestFormDefinition {
   titleField?: string;
   /** Risk score needed for each tier; see risk.ts. */
   riskLevels?: RiskLevels;
+  /** A one-choice question whose answers (`in`) make the request confidential. */
+  confidential?: { field: string; in: readonly string[] };
+  /** Key of the person question naming the business owner, who may see a confidential request. */
+  businessOwnerField?: string;
 }
 
 const options = (values: readonly string[]): Option[] => values.map((value) => ({ value, label: value }));
@@ -139,6 +143,17 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
       { key: 'purpose', label: 'Purpose of use', type: 'textarea', hint: 'What will the service be used for, and by whom?' },
       { key: 'neededBy', label: 'Needed by', type: 'date' },
       { key: 'alternatives', label: 'Alternatives considered', type: 'textarea', optional: true },
+      {
+        key: 'confidential',
+        label: 'Keep this request confidential?',
+        type: 'radio',
+        optional: true,
+        hint: 'Choose Yes for sensitive plans, for example a planned acquisition or a tool for an investigation.',
+        options: [
+          { value: 'No', label: 'No, the usual managers and reviewers can see it' },
+          { value: 'Yes', label: 'Yes, only the business owner, org admins and the people they add' },
+        ],
+      },
     ],
   },
   {
@@ -232,7 +247,12 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
     description: 'Who is responsible for this service. Choose “Not required” where a role does not apply.',
     fields: [
       { key: 'budgetOwner', label: 'Budget owner', type: 'owner' },
-      { key: 'businessOwner', label: 'Business owner', type: 'owner' },
+      {
+        key: 'businessOwner',
+        label: 'Business owner',
+        type: 'owner',
+        hint: 'Use their work email, so they can follow the request even when it is confidential.',
+      },
       { key: 'accessAdministrator', label: 'Access administrator', type: 'owner' },
       { key: 'technicalOwner', label: 'Technical owner', type: 'owner' },
     ],
@@ -254,7 +274,28 @@ export const REQUEST_FORM_STEPS: readonly StepDef[] = [
 ];
 
 /** The standard form every organization starts with. */
-export const DEFAULT_REQUEST_FORM: RequestFormDefinition = { steps: REQUEST_FORM_STEPS, titleField: 'serviceName' };
+export const DEFAULT_REQUEST_FORM: RequestFormDefinition = {
+  steps: REQUEST_FORM_STEPS,
+  titleField: 'serviceName',
+  confidential: { field: 'confidential', in: ['Yes'] },
+  businessOwnerField: 'businessOwner',
+};
+
+/** Whether validated answers ask to keep the request confidential. */
+export function isConfidential(cleaned: Answers, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): boolean {
+  const rule = form.confidential;
+  if (!rule) return false;
+  const value = cleaned[rule.field];
+  return typeof value === 'string' && rule.in.includes(value);
+}
+
+/** The business owner's answer when it is an email address; null otherwise. */
+export function businessOwnerEmail(cleaned: Answers, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): string | null {
+  const key = form.businessOwnerField ?? 'businessOwner';
+  const value = cleaned[key] as OwnerValue | undefined;
+  const name = value && typeof value === 'object' && typeof value.name === 'string' ? value.name.trim() : '';
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(name) ? name.toLowerCase() : null;
+}
 
 /** Key of the question that names a request. */
 export function titleFieldKey(form: RequestFormDefinition = DEFAULT_REQUEST_FORM): string {

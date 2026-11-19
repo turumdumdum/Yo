@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_REQUEST_FORM, validateAnswers, visibleFields, type FieldDef, type RequestFormDefinition } from './requestForm';
+import { businessOwnerEmail, DEFAULT_REQUEST_FORM, isConfidential, validateAnswers, visibleFields, type FieldDef, type RequestFormDefinition } from './requestForm';
 import { nameNewQuestions, newFieldKey, optionsFromLines, parseRequestForm, questionsDependingOn, repairRequestForm } from './requestFormEditor';
 
 const clone = (): { steps: { title: string; description?: string; fields: FieldDef[] }[] } =>
@@ -178,3 +178,32 @@ describe('repairRequestForm', () => {
 function copyWith(form: RequestFormDefinition, index: number, field: FieldDef): RequestFormDefinition {
   return { ...form, steps: [{ ...form.steps[0]!, fields: form.steps[0]!.fields.map((f, i) => (i === index ? field : f)) }] };
 }
+
+describe('confidentiality settings', () => {
+  it('reads the confidentiality answer and the business owner email', () => {
+    expect(isConfidential({ confidential: 'Yes' })).toBe(true);
+    expect(isConfidential({ confidential: 'No' })).toBe(false);
+    expect(isConfidential({})).toBe(false);
+    expect(isConfidential({ confidential: 'Yes' }, { steps: DEFAULT_REQUEST_FORM.steps })).toBe(false);
+    expect(businessOwnerEmail({ businessOwner: { name: ' Ann@Acme.example ' } })).toBe('ann@acme.example');
+    expect(businessOwnerEmail({ businessOwner: { name: 'Ann Lee' } })).toBeNull();
+    expect(businessOwnerEmail({ businessOwner: { notRequired: true } })).toBeNull();
+  });
+
+  it('validates and repairs the settings', () => {
+    const form = clone() as unknown as Record<string, unknown>;
+    form.confidential = { field: 'confidential', in: ['Maybe'] };
+    expect(error(form)).toMatch(/make a request confidential/);
+    form.confidential = { field: 'purpose', in: ['Yes'] };
+    expect(error(form)).toMatch(/one-choice question/);
+    delete form.confidential;
+    form.businessOwnerField = 'purpose';
+    expect(error(form)).toMatch(/person question/);
+
+    const withoutQuestion = { ...DEFAULT_REQUEST_FORM, steps: DEFAULT_REQUEST_FORM.steps.map((s) => ({ ...s, fields: s.fields.filter((f) => f.key !== 'confidential' && f.key !== 'businessOwner') })) };
+    const repaired = repairRequestForm(withoutQuestion);
+    expect(repaired.confidential).toBeUndefined();
+    expect(repaired.businessOwnerField).toBeUndefined();
+    expect(error(repaired)).toBeNull();
+  });
+});

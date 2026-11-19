@@ -11,6 +11,7 @@ import { ActionRequired } from './Questions';
 import { RequestProgress } from './RequestProgress';
 import { StageList } from './StageList';
 import type { ReviewContext } from './StagePanel';
+import { Visibility } from './Visibility';
 
 const formatDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -67,6 +68,7 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
       <p className="badges">
         <RequestStatusBadge status={request.status} />
         {request.risk_tier && <RiskBadge tier={request.risk_tier} />}
+        {request.is_confidential && <span className="status-badge confidential-badge">🔒 Confidential</span>}
       </p>
       {request.submitted_at && (
         <p className="lead">
@@ -110,6 +112,8 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
           )}
         </section>
       )}
+
+      {request.status !== 'draft' && <Visibility supabase={supabase} request={request} context={context} onChanged={reload} />}
 
       <section className="card" aria-labelledby="attachments-heading">
         <h2 id="attachments-heading">Attachments</h2>

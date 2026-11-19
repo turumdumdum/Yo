@@ -1,6 +1,7 @@
 import { parallelProvider } from './ai/parallel';
 import type { AiProvider } from './ai/provider';
 import type { AppOptions } from './app';
+import { logMailer, resendMailer, type Mailer } from './email';
 import { supabaseAttachmentStore } from './supabaseAttachments';
 import { supabaseRequestStore } from './supabaseStore';
 
@@ -29,6 +30,17 @@ export function optionsFromEnv(env: Env): AppOptions {
     throw new Error(`Unknown AI_PROVIDER "${env.AI_PROVIDER}". Supported: parallel.`);
   }
 
+  // Outgoing email is off unless a provider is named. SMTP needs Node (see node.ts).
+  let mailer: Mailer | undefined;
+  const emailProvider = env.EMAIL_PROVIDER?.trim().toLowerCase();
+  if (emailProvider === 'resend') {
+    mailer = resendMailer({ apiKey: required('RESEND_API_KEY'), from: required('EMAIL_FROM') });
+  } else if (emailProvider === 'log') {
+    mailer = logMailer();
+  } else if (emailProvider && emailProvider !== 'smtp') {
+    throw new Error(`Unknown EMAIL_PROVIDER "${env.EMAIL_PROVIDER}". Supported: resend, smtp (Node only), log.`);
+  }
+
   const supabase = {
     url: required('SUPABASE_URL'),
     publishableKey: required('SUPABASE_PUBLISHABLE_KEY'),
@@ -41,6 +53,8 @@ export function optionsFromEnv(env: Env): AppOptions {
     webOrigin: required('WEB_ORIGIN'),
     requests: store,
     admin: store,
+    invitations: store,
+    mailer,
     attachments: supabaseAttachmentStore(supabase),
   };
 }

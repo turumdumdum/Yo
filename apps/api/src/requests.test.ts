@@ -1,7 +1,7 @@
 import type { Answers, PlannedStage, RiskResult } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app';
-import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore } from './requests';
+import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type Visibility } from './requests';
 
 const ID = '11111111-2222-4333-8444-555555555555';
 const ORG = '99999999-2222-4333-8444-555555555555';
@@ -39,7 +39,7 @@ const complete: Answers = {
 };
 
 function setup(draft: DraftRecord | null, overrides: Partial<RequestStore> = {}) {
-  const calls: { id: string; answers: Answers; risk: RiskResult; stages: PlannedStage[] }[] = [];
+  const calls: { id: string; answers: Answers; risk: RiskResult; stages: PlannedStage[]; visibility?: Visibility }[] = [];
   const tokens: string[] = [];
   const store: RequestStore = {
     async getReviewTemplates() {
@@ -49,8 +49,8 @@ function setup(draft: DraftRecord | null, overrides: Partial<RequestStore> = {})
       tokens.push(token);
       return draft;
     },
-    async submit(id, answers, risk, stages) {
-      calls.push({ id, answers, risk, stages });
+    async submit(id, answers, risk, stages, visibility) {
+      calls.push({ id, answers, risk, stages, visibility });
       return {
         id,
         status: 'in_review',
@@ -80,6 +80,14 @@ describe('POST /v1/requests/:id/submit', () => {
     expect(calls[0]!.answers.serviceName).toBe('Acme Analytics');
     expect('annualCost' in calls[0]!.answers).toBe(false);
     expect('riskTier' in calls[0]!.answers).toBe(false);
+    expect(calls[0]!.visibility).toEqual({ confidential: false, businessOwnerEmail: null });
+  });
+
+  it('passes on a request for confidentiality and the business owner email', async () => {
+    const answers = { ...complete, confidential: 'Yes', businessOwner: { name: 'Bo@Acme.example' } };
+    const { submit, calls } = setup({ id: ID, org_id: ORG, status: 'draft', answers });
+    expect((await submit()).status).toBe(200);
+    expect(calls[0]!.visibility).toEqual({ confidential: true, businessOwnerEmail: 'bo@acme.example' });
   });
 
   it('starts the stages that the tier and answers require', async () => {

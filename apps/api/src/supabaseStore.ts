@@ -1,6 +1,7 @@
 import type { Answers, OrgRole, PlannedStage, ReviewTemplate, RiskResult } from '@app/shared';
 import type { AdminStore, Caller, SavedFormInput } from './admin';
-import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type SubmittedRecord } from './requests';
+import { InvitationRefused, type InvitationResult, type InvitationStore } from './invitations';
+import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type SubmittedRecord, type Visibility } from './requests';
 
 export interface SupabaseConfig {
   /** Project URL, for example https://abc.supabase.co */
@@ -12,7 +13,7 @@ export interface SupabaseConfig {
 }
 
 /** Talks to Supabase's REST API with fetch, so it runs on Workers and Node alike. */
-export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof fetch = fetch): RequestStore & AdminStore {
+export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof fetch = fetch): RequestStore & AdminStore & InvitationStore {
   const base = config.url.replace(/\/+$/, '');
   const rest = `${base}/rest/v1`;
   const service = { apikey: config.serviceRoleKey, authorization: `Bearer ${config.serviceRoleKey}`, 'content-type': 'application/json' };
@@ -52,7 +53,7 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
       });
       if (userRes.status === 401 || userRes.status === 403) throw new UnauthorizedError();
       if (!userRes.ok) throw new Error(`Supabase responded ${userRes.status} when reading the user`);
-      const user = (await userRes.json()) as { id: string };
+      const user = (await userRes.json()) as { id: string; email?: string };
       // Read with the caller's own token: RLS (and its MFA rule) applies.
       const query = new URLSearchParams({ user_id: `eq.${user.id}`, select: 'org_id,role', limit: '1' });
       const res = await fetchImpl(`${rest}/memberships?${query}`, {
@@ -61,7 +62,30 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
       if (res.status === 401 || res.status === 403) throw new UnauthorizedError();
       if (!res.ok) throw new Error(`Supabase responded ${res.status} when reading the membership`);
       const rows = (await res.json()) as { org_id: string; role: OrgRole }[];
-      return rows[0] ? { userId: user.id, orgId: rows[0].org_id, role: rows[0].role } : null;
+      return rows[0] ? { userId: user.id, orgId: rows[0].org_id, role: rows[0].role, ...(user.email ? { email: user.email } : {}) } : null;
+    },
+
+    async createInvitations(accessToken: string, orgId: string, rows: { email: string; role: OrgRole }[]): Promise<InvitationResult[]> {
+      // As the user: the database checks the org-admin role, MFA and domain rules.
+      const res = await fetchImpl(`${rest}/rpc/create_invitations`, {
+        method: 'POST',
+        headers: { apikey: config.publishableKey, authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ p_org_id: orgId, p_invitations: rows }),
+      });
+      if (res.status === 401) throw new UnauthorizedError();
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => null)) as { message?: string } | null;
+        if (res.status === 403 || res.status === 400) throw new InvitationRefused(detail?.message ?? 'The invitations were refused');
+        throw new Error(`Supabase responded ${res.status} when creating invitations`);
+      }
+      return (await res.json()) as InvitationResult[];
+    },
+
+    async organizationName(orgId: string): Promise<string> {
+      const res = await fetchImpl(`${rest}/organizations?${new URLSearchParams({ id: `eq.${orgId}`, select: 'name' })}`, { headers: service });
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when reading the organization`);
+      const rows = (await res.json()) as { name: string }[];
+      return rows[0]?.name ?? 'your organization';
     },
 
     async saveReviewTemplate(orgId: string, stage: string, template: ReviewTemplate | null, actorId: string): Promise<void> {
@@ -156,7 +180,21 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
       return 'ok' as const;
     },
 
-    async submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[]): Promise<SubmittedRecord> {
+    async submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[], visibility?: Visibility): Promise<SubmittedRecord> {
+      const visible = await fetchImpl(`${rest}/rpc/set_request_confidentiality`, {
+        method: 'POST',
+        headers: service,
+        body: JSON.stringify({
+          p_request_id: requestId,
+          p_confidential: visibility?.confidential ?? false,
+          p_business_owner_email: visibility?.businessOwnerEmail ?? null,
+        }),
+      });
+      if (!visible.ok) {
+        const body = (await visible.json().catch(() => null)) as { message?: string } | null;
+        if (body?.message?.includes('not a draft')) throw new NotADraftError();
+        throw new Error(`Supabase responded ${visible.status} when recording who may see a request`);
+      }
       const res = await fetchImpl(`${rest}/rpc/submit_request`, {
         method: 'POST',
         headers: {

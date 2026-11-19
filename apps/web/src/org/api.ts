@@ -1,3 +1,4 @@
+import { apiError, callApi } from '../requests/api';
 import type { OrgRole } from '@app/shared';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -14,7 +15,17 @@ export interface Domain {
   verified_at: string | null;
 }
 
-export type BulkInvitationResult = { email: string; role: OrgRole } & ({ token: string } | { error: string });
+/** One invitation as the API reports it: emailed, or with a link to share by hand, or refused. */
+export interface InvitationOutcome {
+  email: string;
+  role: OrgRole;
+  emailed: boolean;
+  /** Present when the email was not sent: share it by hand. Not shown again later. */
+  link?: string;
+  emailError?: string;
+  /** Present when the invitation was refused. */
+  error?: string;
+}
 
 export interface Membership {
   role: OrgRole;
@@ -75,11 +86,14 @@ export async function listInvitations(supabase: SupabaseClient, orgId: string): 
   return data as Invitation[];
 }
 
-/** Returns the one-time token. It is shown once and never stored in readable form. */
-export async function createInvitation(supabase: SupabaseClient, orgId: string, email: string, role: OrgRole): Promise<string> {
-  const { data, error } = await supabase.rpc('create_invitation', { p_org_id: orgId, p_email: email, p_role: role });
-  if (error) throw error;
-  return data as string;
+/**
+ * Creates invitations through the API, which emails each link when email is set up.
+ * The database still checks the org-admin role and the domain rules.
+ */
+export async function sendInvitations(supabase: SupabaseClient, rows: { email: string; role: OrgRole }[]): Promise<InvitationOutcome[]> {
+  const res = await callApi(supabase, '/v1/invitations', 'POST', 60_000, { invitations: rows });
+  if (!res.ok) throw await apiError(res, 'The invitations could not be created.');
+  return ((await res.json()) as { results: InvitationOutcome[] }).results;
 }
 
 export async function revokeInvitation(supabase: SupabaseClient, id: string): Promise<void> {
@@ -96,16 +110,6 @@ export async function setAllowSelfReview(supabase: SupabaseClient, orgId: string
   const { data, error } = await supabase.from('organizations').update({ allow_self_review: allow }).eq('id', orgId).select('id');
   if (error) throw error;
   if (data.length === 0) throw new Error('The setting could not be changed.');
-}
-
-export async function createInvitations(
-  supabase: SupabaseClient,
-  orgId: string,
-  rows: { email: string; role: OrgRole }[],
-): Promise<BulkInvitationResult[]> {
-  const { data, error } = await supabase.rpc('create_invitations', { p_org_id: orgId, p_invitations: rows });
-  if (error) throw error;
-  return data as BulkInvitationResult[];
 }
 
 export async function listDomains(supabase: SupabaseClient, orgId: string): Promise<Domain[]> {

@@ -1,5 +1,7 @@
 import {
+  businessOwnerEmail,
   computeRisk,
+  isConfidential,
   DEFAULT_REQUEST_FORM,
   parseRequestForm,
   parseReviewTemplate,
@@ -48,8 +50,18 @@ export interface RequestStore {
   getAsUser(accessToken: string, requestId: string): Promise<DraftRecord | null>;
   /** The organization's own review forms by stage name, unvalidated. Runs with backend privileges. */
   getReviewTemplates(orgId: string): Promise<Record<string, unknown>>;
-  /** Marks a draft as submitted and starts its stages, atomically. Runs with backend privileges. */
-  submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[]): Promise<SubmittedRecord>;
+  /**
+   * Records who may see the request, then marks the draft as submitted and starts its
+   * stages. Visibility is stored first, so a confidential request is never visible
+   * without it. Runs with backend privileges.
+   */
+  submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[], visibility?: Visibility): Promise<SubmittedRecord>;
+}
+
+export interface Visibility {
+  confidential: boolean;
+  /** Matched against members' emails; that member may see the request. */
+  businessOwnerEmail: string | null;
 }
 
 /** The form a draft was started with. A stored form that fails validation falls back to the standard one. */
@@ -105,7 +117,8 @@ export function requestRoutes(store: RequestStore) {
     const risk = computeRisk(cleaned, form);
     const stages = planStages(risk.tier, cleaned, new Date(), undefined, await reviewTemplates(store, request.org_id), form);
     try {
-      const submitted = await store.submit(id, cleaned, risk, stages);
+      const visibility = { confidential: isConfidential(cleaned, form), businessOwnerEmail: businessOwnerEmail(cleaned, form) };
+      const submitted = await store.submit(id, cleaned, risk, stages, visibility);
       return c.json({
         id: submitted.id,
         status: submitted.status,

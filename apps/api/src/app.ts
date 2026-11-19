@@ -5,6 +5,8 @@ import { secureHeaders } from 'hono/secure-headers';
 import type { AiProvider } from './ai/provider';
 import { aiRoutes } from './ai/routes';
 import { attachmentRoutes, type AttachmentStore } from './attachments';
+import type { Mailer } from './email';
+import { invitationRoutes, type InvitationStore } from './invitations';
 import { requestRoutes, type RequestStore } from './requests';
 
 // Platform-neutral application. Only Web-standard APIs here: anything specific to
@@ -18,6 +20,9 @@ export interface AppOptions {
   ai?: AiProvider;
   admin?: AdminStore;
   attachments?: AttachmentStore;
+  invitations?: InvitationStore;
+  /** Outgoing email; without it invitation links are handed back to share by hand. */
+  mailer?: Mailer;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -51,6 +56,9 @@ export function createApp(options: AppOptions = {}) {
   }
   if (options.admin) app.route('/v1', adminRoutes(options.admin));
   if (options.attachments) app.route('/v1', attachmentRoutes(options.attachments));
+  if (options.invitations && options.webOrigin) {
+    app.route('/v1', invitationRoutes(options.invitations, { webOrigin: options.webOrigin, mailer: options.mailer }));
+  }
 
   app.notFound((c) => c.json({ error: 'Not found' }, 404));
 

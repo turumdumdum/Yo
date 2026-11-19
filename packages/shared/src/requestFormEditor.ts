@@ -138,7 +138,7 @@ export function parseRequestForm(input: unknown): { form: RequestFormDefinition 
   if (!input || typeof input !== 'object' || !Array.isArray((input as { steps?: unknown }).steps)) {
     return { error: 'The form must have a list of steps' };
   }
-  const formExtra = Object.keys(input).find((k) => !['steps', 'titleField', 'riskLevels'].includes(k));
+  const formExtra = Object.keys(input).find((k) => !['steps', 'titleField', 'riskLevels', 'confidential', 'businessOwnerField'].includes(k));
   if (formExtra) return { error: `The form has an unknown setting “${formExtra}”` };
   const steps = (input as { steps: unknown[] }).steps;
   if (steps.length === 0) return { error: 'The form needs at least one step' };
@@ -167,6 +167,20 @@ export function parseRequestForm(input: unknown): { form: RequestFormDefinition 
     const field = typeof titleField === 'string' ? seen.get(titleField) : undefined;
     if (!field || field.type !== 'text') return { error: 'The request name must come from a short-text question in the form' };
     if (field.optional || field.showWhen) return { error: `“${field.label}” names the request, so it must be required and always shown` };
+  }
+  const { confidential, businessOwnerField } = input as { confidential?: unknown; businessOwnerField?: unknown };
+  if (confidential !== undefined) {
+    const rule = confidential as { field?: unknown; in?: unknown } | null;
+    const field = rule && typeof rule.field === 'string' ? seen.get(rule.field) : undefined;
+    if (!field || (field.type !== 'radio' && field.type !== 'select')) return { error: 'The confidentiality question must be a one-choice question in the form' };
+    if (!Array.isArray(rule!.in) || rule!.in.length === 0 || rule!.in.some((v) => !field.options.some((o) => o.value === v))) {
+      return { error: `Choose which answers to “${field.label}” make a request confidential` };
+    }
+    if (Object.keys(rule!).some((k) => k !== 'field' && k !== 'in')) return { error: 'The confidentiality setting is malformed' };
+  }
+  if (businessOwnerField !== undefined) {
+    const field = typeof businessOwnerField === 'string' ? seen.get(businessOwnerField) : undefined;
+    if (!field || field.type !== 'owner') return { error: 'The business owner must be a person question in the form' };
   }
   if (riskLevels !== undefined) {
     const l = riskLevels as Record<string, unknown> | null;
@@ -218,6 +232,8 @@ export function nameNewQuestions(form: RequestFormDefinition, existingKeys: Read
   return {
     ...form,
     ...(form.titleField && renamed.has(form.titleField) ? { titleField: renamed.get(form.titleField)! } : {}),
+    ...(form.confidential && renamed.has(form.confidential.field) ? { confidential: { ...form.confidential, field: renamed.get(form.confidential.field)! } } : {}),
+    ...(form.businessOwnerField && renamed.has(form.businessOwnerField) ? { businessOwnerField: renamed.get(form.businessOwnerField)! } : {}),
     steps: form.steps.map((step) => ({
       ...step,
       fields: step.fields.map((f) => {
@@ -265,9 +281,19 @@ export function repairRequestForm(form: RequestFormDefinition): RequestFormDefin
       return next;
     }),
   }));
+  const next: { -readonly [K in keyof RequestFormDefinition]: RequestFormDefinition[K] } = { ...form, steps };
   const title = form.titleField ? byKey.get(form.titleField) : undefined;
-  const { titleField: _title, ...rest } = form;
-  return title && title.type === 'text' ? { ...form, steps } : { ...rest, steps };
+  if (form.titleField && (!title || title.type !== 'text')) delete next.titleField;
+  if (form.confidential) {
+    const controller = byKey.get(form.confidential.field);
+    if (!controller || (controller.type !== 'radio' && controller.type !== 'select')) delete next.confidential;
+    else {
+      const kept = form.confidential.in.filter((v) => controller.options.some((o) => o.value === v));
+      if (kept.length !== form.confidential.in.length) next.confidential = { ...form.confidential, in: kept };
+    }
+  }
+  if (form.businessOwnerField && byKey.get(form.businessOwnerField)?.type !== 'owner') delete next.businessOwnerField;
+  return next;
 }
 
 /** Questions whose condition points at the given question. */

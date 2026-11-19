@@ -201,7 +201,7 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
       {tab === 'requests' && (
         <section className="card" aria-labelledby="requests-heading">
           <div className="card-head">
-            <h2 id="requests-heading">{isManager || role === 'auditor' ? 'Requests' : 'Your requests'}</h2>
+            <h2 id="requests-heading">Vendors and requests</h2>
             {canCreate && requests !== null && requests.length > 0 && (
               <button type="button" className="button" disabled={busy} onClick={() => void startRequest()}>
                 + New request

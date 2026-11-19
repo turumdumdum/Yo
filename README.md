@@ -14,8 +14,10 @@ Open-source vendor intake and due-diligence service. A requester submits a reque
 | Triage and stages | Submission starts the default review stages required by the risk tier, each with an SLA due date |
 | Reviews | Reviewer assignment, per-stage checklist and relevant answers, configurable review forms (a full security review form by default, with certification rules), approve / approve with conditions / reject, automatic final decision, review queue |
 | Questions | A reviewer asks the requester inside a stage; the stage waits and its SLA clock pauses until the answer |
+| Start screen | Four views with counts: my requests, being checked, approved vendors, rejected; search by service or vendor |
+| Confidential requests | A requester can keep a request confidential: only the requester, org admins, the business owner, people an admin adds and assigned reviewers see it, enforced in the database |
 | Attachments | Private storage, upload and download only through short-lived signed links issued by the API, downloads audited. Not scanned for malware |
-| Admin | Sections for people (search, roles, invitations one by one or in bulk from CSV/JSON), email domains, request form editor with preview, review form editor, settings |
+| Admin | Sections for people (search, roles, invitations by email one by one or in bulk from CSV/JSON), email domains, request form editor with preview, review form editor, settings |
 | AI plugin (optional) | Off by default. With your own Parallel API key: vendor lookup with suggestions under each field, and a check of the answers. Other providers can be plugged in |
 | `packages/shared` | Product vocabulary, form definition and validation, triage risk-tier engine |
 | `supabase/` | Migrations with Row Level Security on every table, tenant-isolation tests |
@@ -23,7 +25,7 @@ Open-source vendor intake and due-diligence service. A requester submits a reque
 | `apps/web` | React + Vite app |
 | `deploy/`, `ee/` | Placeholders |
 
-Not built yet: email (invitations and notifications; links and in-app banners for now), password recovery, Google sign-in, vendor registry, evidence expiry, malware scanning of uploads, self-host Docker Compose. The API has no general rate limiting yet.
+Not built yet: email notifications about requests (invitations are emailed; see `apps/api/.env.example`), password recovery, Google sign-in, vendor registry, evidence expiry, malware scanning of uploads, self-host Docker Compose. The API has no general rate limiting yet.
 
 ## Repository layout
 
