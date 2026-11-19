@@ -1,4 +1,4 @@
-import { DEFAULT_REQUEST_FORM, DEFAULT_REVIEW_TEMPLATES, type ReviewTemplate } from '@app/shared';
+import { defaultWorkflowSettings, DEFAULT_REQUEST_FORM, DEFAULT_REVIEW_TEMPLATES, type ReviewTemplate, type WorkflowSettings } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 import type { AdminStore, Caller, SavedFormInput } from './admin';
 import { createApp } from './app';
@@ -6,9 +6,12 @@ import { UnauthorizedError } from './requests';
 
 const security = DEFAULT_REVIEW_TEMPLATES['Security review']!;
 
-function setup(caller: Caller | null | Error) {
+function setup(caller: Caller | null | Error, failFiles = false) {
   const saved: { orgId: string; stage: string; template: ReviewTemplate | null; actorId: string }[] = [];
   const forms: { op: string; orgId: string; id?: string | null; input?: SavedFormInput }[] = [];
+  const workflows: { orgId: string; settings: WorkflowSettings | null; actorId: string }[] = [];
+  const purged: { id: string; actorId: string }[] = [];
+  const removed: string[] = [];
   const admin: AdminStore = {
     async createRequestForm(orgId, input) {
       if (input.name === 'Taken') return 'name-taken';
@@ -37,6 +40,19 @@ function setup(caller: Caller | null | Error) {
     async saveReviewTemplate(orgId, stage, template, actorId) {
       saved.push({ orgId, stage, template, actorId });
     },
+    async saveWorkflowSettings(orgId, settings, actorId) {
+      workflows.push({ orgId, settings, actorId });
+    },
+    async purgeRequest(id, actorId) {
+      purged.push({ id, actorId });
+      if (id === FORM_ID) return ['o1/r/a.pdf'];
+      if (id === NOT_IN_TRASH) return 'not-in-trash';
+      return 'not-found';
+    },
+    async removeAttachmentFiles(paths) {
+      if (failFiles) throw new Error('storage down');
+      removed.push(...paths);
+    },
   };
   const app = createApp({ admin, webOrigin: 'http://localhost:5173' });
   const call = (method: string, stage: string, body?: unknown, headers: Record<string, string> = { authorization: 'Bearer t' }) =>
@@ -51,7 +67,7 @@ function setup(caller: Caller | null | Error) {
       headers: { ...headers, 'content-type': 'application/json' },
       body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
     });
-  return { app, call, saved, forms, formCall };
+  return { app, call, saved, forms, formCall, workflows, purged, removed };
 }
 
 const orgAdmin: Caller = { userId: 'u1', orgId: 'o1', role: 'org_admin' };
@@ -167,5 +183,57 @@ describe('request forms API', () => {
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'Only an org admin or process manager can change request forms' });
     expect(forms).toEqual([]);
+  });
+});
+
+describe('review settings API', () => {
+  const put = (app: ReturnType<typeof setup>['app'], body: unknown) =>
+    app.request('/v1/workflow', { method: 'PUT', headers: { authorization: 'Bearer t', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+  it('stores validated settings and resets to the defaults', async () => {
+    const { app, workflows } = setup(orgAdmin);
+    const stages = defaultWorkflowSettings();
+    stages['Legal review'] = { ...stages['Legal review']!, requirement: 'never', checklist: ['  Read the terms  '] };
+    const res = await put(app, { stages });
+    expect(res.status).toBe(200);
+    expect(workflows[0]!.settings!['Legal review']).toMatchObject({ requirement: 'never', checklist: ['Read the terms'] });
+    expect(workflows[0]!.actorId).toBe('u1');
+    expect((await app.request('/v1/workflow', { method: 'DELETE', headers: { authorization: 'Bearer t' } })).status).toBe(204);
+    expect(workflows[1]!.settings).toBeNull();
+  });
+
+  it('explains broken settings and refuses requesters', async () => {
+    const { app, workflows } = setup(orgAdmin);
+    const stages = defaultWorkflowSettings();
+    for (const s of Object.values(stages)) s.requirement = 'never';
+    const res = await put(app, { stages });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: string }).error).toMatch(/At least one review must always be needed/);
+    expect(workflows).toEqual([]);
+    expect((await put(setup({ ...orgAdmin, role: 'requester' }).app, { stages: defaultWorkflowSettings() })).status).toBe(403);
+  });
+});
+
+const NOT_IN_TRASH = '44444444-2222-4333-8444-555555555555';
+
+describe('deleting a request for good', () => {
+  const del = (app: ReturnType<typeof setup>['app'], id: string) => app.request(`/v1/requests/${id}`, { method: 'DELETE', headers: { authorization: 'Bearer t' } });
+
+  it('deletes from the trash and removes the files', async () => {
+    const { app, purged, removed } = setup(orgAdmin);
+    const res = await del(app, FORM_ID);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ deleted: true, filesRemoved: true });
+    expect(purged).toEqual([{ id: FORM_ID, actorId: 'u1' }]);
+    expect(removed).toEqual(['o1/r/a.pdf']);
+    expect(await (await del(setup(orgAdmin, true).app, FORM_ID)).json()).toEqual({ deleted: true, filesRemoved: false });
+  });
+
+  it('is for org admins, for requests in the trash', async () => {
+    expect((await del(setup({ ...orgAdmin, role: 'process_manager' }).app, FORM_ID)).status).toBe(403);
+    expect((await del(setup({ ...orgAdmin, role: 'requester' }).app, FORM_ID)).status).toBe(403);
+    expect((await del(setup(orgAdmin).app, NOT_IN_TRASH)).status).toBe(409);
+    expect((await del(setup(orgAdmin).app, '55555555-2222-4333-8444-555555555555')).status).toBe(404);
+    expect((await del(setup(orgAdmin).app, 'nope')).status).toBe(404);
   });
 });

@@ -265,8 +265,18 @@ function RuleEditor({
 }
 
 /** Lets org admins configure the review form of each stage. */
-export function ReviewFormEditor({ supabase, orgId }: { supabase: SupabaseClient; orgId: string }) {
-  const [stage, setStage] = useState<string>('Security review');
+interface ReviewFormEditorProps {
+  supabase: SupabaseClient;
+  orgId: string;
+  /** Edit this stage's form only, inside its review card; without it a stage picker is shown. */
+  stage?: string;
+  /** Called after the form was saved or reset, so the card can update its summary. */
+  onSaved?: () => void;
+}
+
+export function ReviewFormEditor({ supabase, orgId, stage: fixedStage, onSaved }: ReviewFormEditorProps) {
+  const [stage, setStage] = useState<string>(fixedStage ?? 'Security review');
+  const embedded = fixedStage !== undefined;
   const [template, setTemplate] = useState<ReviewTemplate | null>(null);
   const [custom, setCustom] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -322,6 +332,7 @@ export function ReviewFormEditor({ supabase, orgId }: { supabase: SupabaseClient
       setCustom(true);
       setDirty(false);
       setNotice('Saved. Requests submitted from now on use this form; reviews already started keep theirs.');
+      onSaved?.();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -337,6 +348,7 @@ export function ReviewFormEditor({ supabase, orgId }: { supabase: SupabaseClient
       await resetReviewTemplate(supabase, stage);
       await load(stage);
       setNotice('The default form applies again to new requests.');
+      onSaved?.();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -349,13 +361,14 @@ export function ReviewFormEditor({ supabase, orgId }: { supabase: SupabaseClient
   const multi = fields.filter((f) => f.type === 'multiselect');
 
   return (
-    <section className="card" aria-labelledby="forms-heading">
-      <h2 id="forms-heading">Review forms</h2>
+    <section className={embedded ? 'embedded-editor' : 'card'} aria-labelledby={embedded ? undefined : 'forms-heading'} aria-label={embedded ? `${stage} form` : undefined}>
+      {!embedded && <h2 id="forms-heading">Review forms</h2>}
       <p className="field-hint">
         Questions the reviewer answers for a stage, in addition to its checklist. Required questions must be answered before
         approving. The default security review form follows common vendor-assessment practice; adapt it to your policy. It is a
         starting point, not a certification guarantee.
       </p>
+      {!embedded && (
       <div className="field narrow">
         <label htmlFor="form-stage">Stage</label>
         <select
@@ -373,6 +386,7 @@ export function ReviewFormEditor({ supabase, orgId }: { supabase: SupabaseClient
           ))}
         </select>
       </div>
+      )}
       {template && (
         <p className="badges">
           <span className="status-badge" data-tone={custom ? 'review' : 'idle'}>

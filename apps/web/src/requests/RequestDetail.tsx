@@ -12,6 +12,7 @@ import { RequestProgress } from './RequestProgress';
 import { StageList } from './StageList';
 import type { ReviewContext } from './StagePanel';
 import { Visibility } from './Visibility';
+import { Lifecycle } from './Lifecycle';
 
 const formatDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -69,6 +70,16 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
         <RequestStatusBadge status={request.status} />
         {request.risk_tier && <RiskBadge tier={request.risk_tier} />}
         {request.is_confidential && <span className="status-badge confidential-badge">🔒 Confidential</span>}
+        {request.archived_at && !request.deleted_at && (
+          <span className="status-badge" data-tone="idle">
+            Archived
+          </span>
+        )}
+        {request.deleted_at && (
+          <span className="status-badge" data-tone="rejected">
+            In the trash
+          </span>
+        )}
       </p>
       {request.submitted_at && (
         <p className="lead">
@@ -80,6 +91,7 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
         <RequestProgress request={request} stages={stages} questions={questions} isRequester={request.requester_id === context.userId} />
       )}
       <FormError message={error} />
+      <Lifecycle supabase={supabase} request={request} context={context} onChanged={reload} onDeleted={onClose} />
 
       {request.requester_id === context.userId && open.length > 0 && (
         <ActionRequired

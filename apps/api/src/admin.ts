@@ -2,6 +2,8 @@ import {
   DEFAULT_STAGES,
   parseRequestForm,
   parseReviewTemplate,
+  parseWorkflowSettings,
+  type WorkflowSettings,
   type OrgRole,
   type RequestFormDefinition,
   type ReviewTemplate,
@@ -32,6 +34,15 @@ export interface AdminStore {
   deleteRequestForm(orgId: string, id: string, actorId: string): Promise<'ok' | 'not-found'>;
   /** Makes a saved form the one new requests use; null returns to the standard form. */
   activateRequestForm(orgId: string, id: string | null, actorId: string): Promise<'ok' | 'not-found'>;
+  /** Stores when each review is needed, its time and checklist; null returns to the defaults. Audited. */
+  saveWorkflowSettings(orgId: string, settings: WorkflowSettings | null, actorId: string): Promise<void>;
+  /**
+   * Deletes a request in the trash for good (the database checks that the actor is an
+   * org admin of its organization) and returns the storage paths of its files.
+   */
+  purgeRequest(requestId: string, actorId: string): Promise<string[] | 'not-found' | 'not-in-trash' | 'forbidden'>;
+  /** Removes files from private storage. */
+  removeAttachmentFiles(paths: string[]): Promise<void>;
 }
 
 export interface SavedFormInput {
@@ -80,6 +91,54 @@ export function adminRoutes(store: AdminStore) {
     if ('error' in parsed) return c.json({ error: parsed.error }, 422);
     await store.saveReviewTemplate(caller.orgId, stage, parsed.template, caller.userId);
     return c.json(parsed.template);
+  });
+
+  // Deleting a request for good: org admins only, and only from the trash.
+  routes.delete('/requests/:id', async (c) => {
+    const caller = await manager(c, 'requests');
+    if (caller instanceof Response) return caller;
+    if (caller.role !== 'org_admin') return c.json({ error: 'Only an org admin can delete a request' }, 403);
+    const id = c.req.param('id');
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return c.json({ error: 'Not found' }, 404);
+    const result = await store.purgeRequest(id, caller.userId);
+    if (result === 'not-found') return c.json({ error: 'Not found' }, 404);
+    if (result === 'forbidden') return c.json({ error: 'Only an org admin can delete a request' }, 403);
+    if (result === 'not-in-trash') return c.json({ error: 'Move the request to the trash first' }, 409);
+    let filesRemoved = true;
+    if (result.length > 0) {
+      try {
+        await store.removeAttachmentFiles(result);
+      } catch (error) {
+        // The request is gone; leftover files are only reachable with the service key.
+        console.error(`Request ${id} was deleted but ${result.length} file(s) could not be removed:`, error);
+        filesRemoved = false;
+      }
+    }
+    return c.json({ deleted: true, filesRemoved });
+  });
+
+  routes.put('/workflow', async (c) => {
+    const caller = await manager(c, 'review settings');
+    if (caller instanceof Response) return caller;
+    const raw = await c.req.text();
+    if (raw.length > MAX_BODY_BYTES) return c.json({ error: 'The settings are too large' }, 413);
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return c.json({ error: 'Expected JSON' }, 400);
+    }
+    const parsed = parseWorkflowSettings((body as { stages?: unknown } | null)?.stages);
+    if ('error' in parsed) return c.json({ error: parsed.error }, 422);
+    await store.saveWorkflowSettings(caller.orgId, parsed.settings, caller.userId);
+    return c.json({ stages: parsed.settings });
+  });
+
+  routes.delete('/workflow', async (c) => {
+    const caller = await manager(c, 'review settings');
+    if (caller instanceof Response) return caller;
+    await store.saveWorkflowSettings(caller.orgId, null, caller.userId);
+    return c.body(null, 204);
   });
 
   routes.delete('/review-forms/:stage', async (c) => {

@@ -1,0 +1,303 @@
+import {
+  allFields,
+  DEFAULT_REQUEST_FORM,
+  DEFAULT_STAGES,
+  defaultWorkflowSettings,
+  describeRequirement,
+  parseWorkflowSettings,
+  RISK_TIERS,
+  STAGE_LIMITS,
+  type FieldDef,
+  type RaisedTier,
+  type StageSettings,
+  type WorkflowSettings,
+} from '@app/shared';
+import { useCallback, useEffect, useId, useState } from 'react';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { FormError } from '../components/FormError';
+import { errorMessage } from '../lib/errors';
+import {
+  customizedReviewForms,
+  listRequestForms,
+  loadWorkflowSettings,
+  resetWorkflowSettings,
+  saveWorkflowSettings,
+} from '../requests/api';
+import { ReviewFormEditor } from './ReviewFormEditor';
+
+// One card per review: when it is needed, how long the reviewer has, what they confirm,
+// and the form they fill in. Changes apply to requests submitted afterwards.
+
+type OneChoice = Extract<FieldDef, { options: unknown }>;
+
+const TONE: Record<StageSettings['requirement'], string> = { always: 'approved', by_risk: 'review', never: 'idle' };
+const SHORT: Record<StageSettings['requirement'], string> = { always: 'Always', by_risk: 'By risk', never: 'Off' };
+
+function StageSettingsEditor({
+  stage,
+  initial,
+  questions,
+  onSave,
+  onCancel,
+}: {
+  stage: string;
+  initial: StageSettings;
+  questions: OneChoice[];
+  onSave: (next: StageSettings) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const id = useId();
+  const [s, setS] = useState<StageSettings>(initial);
+  const [checklistText, setChecklistText] = useState(initial.checklist.join('\n'));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const condition = s.onlyWhen ? questions.find((q) => q.key === s.onlyWhen!.field) : undefined;
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave({ ...s, checklist: checklistText.split('\n').map((l) => l.trim()).filter(Boolean) });
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="stage-settings">
+      <fieldset className="field">
+        <legend>When is the {stage.toLowerCase()} needed?</legend>
+        <div className="choices">
+          <label className="choice">
+            <input type="radio" name={`${id}-req`} checked={s.requirement === 'always'} onChange={() => setS({ ...s, requirement: 'always' })} />
+            Always, for every request
+          </label>
+          <label className="choice">
+            <input type="radio" name={`${id}-req`} checked={s.requirement === 'by_risk'} onChange={() => setS({ ...s, requirement: 'by_risk' })} />
+            Only for riskier requests
+          </label>
+          {s.requirement === 'by_risk' && (
+            <div className="field nested">
+              <label htmlFor={`${id}-tier`}>Needed from risk level</label>
+              <select id={`${id}-tier`} value={s.minTier} onChange={(e) => setS({ ...s, minTier: e.target.value as RaisedTier })}>
+                {RISK_TIERS.filter((t) => t !== 'Low').map((t) => (
+                  <option key={t} value={t}>
+                    {t} and higher
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <label className="choice">
+            <input type="radio" name={`${id}-req`} checked={s.requirement === 'never'} onChange={() => setS({ ...s, requirement: 'never' })} />
+            Never: turn this review off
+          </label>
+        </div>
+      </fieldset>
+
+      {s.requirement !== 'never' && (
+        <fieldset className="field">
+          <legend>Extra condition (optional)</legend>
+          <label className="choice">
+            <input
+              type="checkbox"
+              checked={s.onlyWhen !== null}
+              onChange={(e) => {
+                const first = questions[0];
+                setS({ ...s, onlyWhen: e.target.checked && first ? { field: first.key, in: [] } : null });
+              }}
+              disabled={questions.length === 0 && s.onlyWhen === null}
+            />
+            Only when an answer in the request form matches
+          </label>
+          {s.onlyWhen && (
+            <div className="field nested">
+              <label htmlFor={`${id}-q`}>Question</label>
+              <select id={`${id}-q`} value={s.onlyWhen.field} onChange={(e) => setS({ ...s, onlyWhen: { field: e.target.value, in: [] } })}>
+                {!condition && <option value={s.onlyWhen.field}>{s.onlyWhen.field} (not in the form in use)</option>}
+                {questions.map((q) => (
+                  <option key={q.key} value={q.key}>
+                    {q.label}
+                  </option>
+                ))}
+              </select>
+              {condition && (
+                <div className="choices" role="group" aria-label="Answers that need this review">
+                  {condition.options.map((o) => (
+                    <label key={o.value} className="choice">
+                      <input
+                        type="checkbox"
+                        checked={s.onlyWhen!.in.includes(o.value)}
+                        onChange={(e) => {
+                          const current = s.onlyWhen!.in;
+                          setS({ ...s, onlyWhen: { field: condition.key, in: e.target.checked ? [...current, o.value] : current.filter((v) => v !== o.value) } });
+                        }}
+                      />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="field-hint">If a request’s form does not ask this question, the condition is skipped and the review runs.</p>
+            </div>
+          )}
+        </fieldset>
+      )}
+
+      <div className="editor-row">
+        <div className="field">
+          <label htmlFor={`${id}-sla`}>Time to review (business days)</label>
+          <input
+            id={`${id}-sla`}
+            type="number"
+            min={STAGE_LIMITS.slaMin}
+            max={STAGE_LIMITS.slaMax}
+            value={s.slaBusinessDays}
+            onChange={(e) => setS({ ...s, slaBusinessDays: Math.round(Number(e.target.value) || 0) })}
+          />
+        </div>
+      </div>
+      <div className="field">
+        <label htmlFor={`${id}-check`}>Checklist: what the reviewer confirms, one item per line</label>
+        <textarea id={`${id}-check`} rows={Math.min(10, Math.max(3, checklistText.split('\n').length + 1))} value={checklistText} onChange={(e) => setChecklistText(e.target.value)} />
+      </div>
+
+      <FormError message={error} />
+      <div className="form-actions">
+        <button type="button" className="button" disabled={busy} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Save settings'}
+        </button>
+        <button type="button" className="button button-secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function ReviewsSection({ supabase, orgId }: { supabase: SupabaseClient; orgId: string }) {
+  const [settings, setSettings] = useState<WorkflowSettings | null>(null);
+  const [isCustom, setIsCustom] = useState(false);
+  const [customForms, setCustomForms] = useState<string[]>([]);
+  const [questions, setQuestions] = useState<OneChoice[]>([]);
+  const [open, setOpen] = useState<{ stage: string; panel: 'settings' | 'form' } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const [stored, forms, saved] = await Promise.all([loadWorkflowSettings(supabase, orgId), customizedReviewForms(supabase, orgId), listRequestForms(supabase, orgId)]);
+      const parsed = stored === null ? null : parseWorkflowSettings(stored);
+      setSettings(parsed && 'settings' in parsed ? parsed.settings : defaultWorkflowSettings());
+      setIsCustom(parsed !== null && 'settings' in parsed);
+      setCustomForms(forms);
+      // Conditions point at questions of the form new requests use.
+      const inUse = saved.find((f) => f.is_active)?.definition ?? DEFAULT_REQUEST_FORM;
+      setQuestions(allFields(inUse).filter((f): f is OneChoice => f.type === 'radio' || f.type === 'select'));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }, [supabase, orgId]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const labelOf = (key: string) => questions.find((q) => q.key === key)?.label ?? key;
+
+  async function saveStage(stage: string, next: StageSettings) {
+    if (!settings) return;
+    await saveWorkflowSettings(supabase, { ...settings, [stage]: next });
+    setOpen(null);
+    setNotice(`${stage} saved. Requests submitted from now on follow it; requests already sent keep their checks.`);
+    await reload();
+  }
+
+  return (
+    <section className="card" aria-labelledby="reviews-heading">
+      <h2 id="reviews-heading">Reviews</h2>
+      <p className="field-hint">
+        Each request goes through these checks. For each one, choose when it is needed, how long the reviewer has, what they
+        confirm and what they fill in. Changes apply to requests submitted afterwards.
+      </p>
+      <FormError message={error} />
+      {notice && (
+        <p className="notice notice-approved" role="status">
+          {notice}
+        </p>
+      )}
+      {!settings ? (
+        <p role="status">Loading…</p>
+      ) : (
+        <ul className="review-cards">
+          {DEFAULT_STAGES.map((stage) => {
+            const s = settings[stage]!;
+            const isOpen = open?.stage === stage;
+            return (
+              <li key={stage} className={`review-card${s.requirement === 'never' ? ' is-off' : ''}`}>
+                <div className="review-card-head">
+                  <h3>{stage}</h3>
+                  <span className="status-badge" data-tone={TONE[s.requirement]}>
+                    {SHORT[s.requirement]}
+                  </span>
+                </div>
+                <p className="review-card-summary">{describeRequirement(s, labelOf)}.</p>
+                <ul className="review-card-facts">
+                  <li>{s.requirement === 'never' ? '—' : `${s.slaBusinessDays} business ${s.slaBusinessDays === 1 ? 'day' : 'days'} to review`}</li>
+                  <li>
+                    {s.checklist.length} checklist {s.checklist.length === 1 ? 'item' : 'items'}
+                  </li>
+                  <li>{customForms.includes(stage) ? 'Own review form' : 'Standard review form'}</li>
+                </ul>
+                <div className="question-actions">
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    aria-expanded={isOpen && open.panel === 'settings'}
+                    onClick={() => setOpen(isOpen && open.panel === 'settings' ? null : { stage, panel: 'settings' })}
+                  >
+                    When needed and checklist<span className="visually-hidden"> for {stage}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary button-small"
+                    aria-expanded={isOpen && open.panel === 'form'}
+                    onClick={() => setOpen(isOpen && open.panel === 'form' ? null : { stage, panel: 'form' })}
+                  >
+                    Review form<span className="visually-hidden"> for {stage}</span>
+                  </button>
+                </div>
+                {isOpen && open.panel === 'settings' && (
+                  <StageSettingsEditor stage={stage} initial={s} questions={questions} onSave={(next) => saveStage(stage, next)} onCancel={() => setOpen(null)} />
+                )}
+                {isOpen && open.panel === 'form' && <ReviewFormEditor supabase={supabase} orgId={orgId} stage={stage} onSaved={() => void reload()} />}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {isCustom && (
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => {
+            if (!window.confirm('Go back to the standard settings for all reviews? Review forms are not changed.')) return;
+            void (async () => {
+              try {
+                await resetWorkflowSettings(supabase);
+                setNotice('All reviews follow the standard settings again.');
+                await reload();
+              } catch (e) {
+                setError(errorMessage(e));
+              }
+            })();
+          }}
+        >
+          Reset all reviews to the standard settings
+        </button>
+      )}
+    </section>
+  );
+}

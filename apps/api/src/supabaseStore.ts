@@ -1,4 +1,4 @@
-import type { Answers, OrgRole, PlannedStage, ReviewTemplate, RiskResult } from '@app/shared';
+import { ATTACHMENT_BUCKET, type Answers, type OrgRole, type PlannedStage, type ReviewTemplate, type RiskResult, type WorkflowSettings } from '@app/shared';
 import type { AdminStore, Caller, SavedFormInput } from './admin';
 import { InvitationRefused, type InvitationResult, type InvitationStore } from './invitations';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type SubmittedRecord, type Visibility } from './requests';
@@ -37,6 +37,64 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
       if (!res.ok) throw new Error(`Supabase responded ${res.status} when reading a request`);
       const rows = (await res.json()) as DraftRecord[];
       return rows[0] ?? null;
+    },
+
+    async purgeRequest(requestId: string, actorId: string) {
+      const res = await fetchImpl(`${rest}/rpc/purge_request`, {
+        method: 'POST',
+        headers: service,
+        body: JSON.stringify({ p_request_id: requestId, p_actor: actorId }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { message?: string } | null;
+        const message = body?.message ?? '';
+        if (message.includes('request not found')) return 'not-found' as const;
+        if (message.includes('only an org admin')) return 'forbidden' as const;
+        if (message.includes('trash first')) return 'not-in-trash' as const;
+        throw new Error(`Supabase responded ${res.status} when deleting a request`);
+      }
+      return (await res.json()) as string[];
+    },
+
+    async removeAttachmentFiles(paths: string[]): Promise<void> {
+      const res = await fetchImpl(`${base}/storage/v1/object/${ATTACHMENT_BUCKET}`, {
+        method: 'DELETE',
+        headers: service,
+        body: JSON.stringify({ prefixes: paths }),
+      });
+      if (!res.ok) throw new Error(`Supabase storage responded ${res.status} when removing files`);
+    },
+
+    async getWorkflowSettings(orgId: string): Promise<unknown> {
+      const res = await fetchImpl(`${rest}/workflow_settings?${new URLSearchParams({ org_id: `eq.${orgId}`, select: 'stages' })}`, { headers: service });
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when reading review settings`);
+      const rows = (await res.json()) as { stages: unknown }[];
+      return rows[0]?.stages ?? null;
+    },
+
+    async saveWorkflowSettings(orgId: string, settings: WorkflowSettings | null, actorId: string): Promise<void> {
+      const res =
+        settings === null
+          ? await fetchImpl(`${rest}/workflow_settings?${new URLSearchParams({ org_id: `eq.${orgId}` })}`, { method: 'DELETE', headers: service })
+          : await fetchImpl(`${rest}/workflow_settings?on_conflict=org_id`, {
+              method: 'POST',
+              headers: { ...service, prefer: 'resolution=merge-duplicates' },
+              body: JSON.stringify({ org_id: orgId, stages: settings, updated_by: actorId, updated_at: new Date().toISOString() }),
+            });
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when saving review settings`);
+      const audit = await fetchImpl(`${rest}/audit_log`, {
+        method: 'POST',
+        headers: service,
+        body: JSON.stringify({
+          org_id: orgId,
+          actor_id: actorId,
+          action: settings === null ? 'workflow.reset' : 'workflow.updated',
+          entity_type: 'workflow',
+          entity_id: orgId,
+          metadata: settings === null ? {} : { stages: Object.fromEntries(Object.entries(settings).map(([k, v]) => [k, v.requirement])) },
+        }),
+      });
+      if (!audit.ok) throw new Error(`Supabase responded ${audit.status} when writing the audit log`);
     },
 
     async getReviewTemplates(orgId: string): Promise<Record<string, unknown>> {

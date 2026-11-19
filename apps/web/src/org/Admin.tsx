@@ -19,7 +19,7 @@ import {
 import { DomainsSection } from './DomainsSection';
 import { InviteSection } from './InviteSection';
 import { RequestFormsSection } from './RequestFormEditor';
-import { ReviewFormEditor } from './ReviewFormEditor';
+import { ReviewsSection } from './ReviewsSection';
 
 interface Props {
   supabase: SupabaseClient;
@@ -36,7 +36,7 @@ const SECTIONS: { id: AdminSection; label: string; hint: string }[] = [
   { id: 'people', label: 'People', hint: 'Members, roles and invitations' },
   { id: 'domains', label: 'Email domains', hint: 'Who may be invited' },
   { id: 'request-form', label: 'Request form', hint: 'Questions requesters answer' },
-  { id: 'review-forms', label: 'Review forms', hint: 'Questions reviewers answer' },
+  { id: 'review-forms', label: 'Reviews', hint: 'Which checks run, and their forms' },
   { id: 'settings', label: 'Settings', hint: 'Review rules' },
 ];
 
@@ -252,7 +252,7 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
 
         {section === 'request-form' && <RequestFormsSection supabase={supabase} orgId={organization.id} />}
 
-        {section === 'review-forms' && <ReviewFormEditor supabase={supabase} orgId={organization.id} />}
+        {section === 'review-forms' && <ReviewsSection supabase={supabase} orgId={organization.id} />}
 
         {section === 'settings' && (
           <section className="card" aria-labelledby="settings-heading">

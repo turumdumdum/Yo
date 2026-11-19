@@ -16,6 +16,8 @@ Open-source vendor intake and due-diligence service. A requester submits a reque
 | Questions | A reviewer asks the requester inside a stage; the stage waits and its SLA clock pauses until the answer |
 | Start screen | Four views with counts: my requests, being checked, approved vendors, rejected; search by service or vendor |
 | Confidential requests | A requester can keep a request confidential: only the requester, org admins, the business owner, people an admin adds and assigned reviewers see it, enforced in the database |
+| Review settings | Per review: always / from a risk level / off, optional condition on an answer, time to review, checklist and its own review form |
+| Archive and trash | Org admins archive decided vendors, move them to the trash (visible to admins only), restore them or delete them for good with their files |
 | Attachments | Private storage, upload and download only through short-lived signed links issued by the API, downloads audited. Not scanned for malware |
 | Admin | Sections for people (search, roles, invitations by email one by one or in bulk from CSV/JSON), email domains, request form editor with preview, review form editor, settings |
 | AI plugin (optional) | Off by default. With your own Parallel API key: vendor lookup with suggestions under each field, and a check of the answers. Other providers can be plugged in |

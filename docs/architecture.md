@@ -103,6 +103,19 @@ CLAUDE.md §2 applies: the core works without AI, the plugin is off by default a
 
 `computeRisk` (`packages/shared/src/risk.ts`) adds up the risk points the request form assigns to the answers and applies minimum tiers; see "Request forms". The default weights are a proposal and have not been approved as policy.
 
+## Review settings
+
+- Admins (and process managers) set, per review, when it is needed (always, from a risk level, or never), an optional condition on a one-choice answer, the time to review in business days and the checklist (`packages/shared/src/stageSettings.ts`). They are stored in `workflow_settings` (one row per organization, written by `PUT /v1/workflow` after validation, audited; `DELETE` returns to the defaults) and turned into the workflow at submission. Stored settings that fail validation fall back to the defaults.
+- At least one review must always be needed without a condition; otherwise a request could end up with no checks and never get a decision.
+- In the Admin "Reviews" section each review is a card with these settings and its review form (`review_templates`).
+
+## Archive and trash
+
+- Org admins can archive approved or rejected requests (`set_request_archived`) and move them to the trash (`set_request_trashed`); both are reversible and audited. Requests still in review cannot be archived or trashed, so no open check is left behind.
+- Archived requests stay visible to whoever could see them and are listed under Archived instead of the main views.
+- Requests in the trash are visible to org admins only (a restrictive select policy on `requests`; stages, questions, files and viewers follow).
+- `DELETE /v1/requests/:id` deletes a request in the trash for good: `purge_request` (service role, checks that the caller is an org admin) removes it with its stages, questions, viewers and attachment records and returns the file paths, which the API then removes from storage. The audit log keeps the deletion and the name. There is no automatic purge of old trash yet.
+
 ## Confidential requests
 
 - A form names a one-choice question (`confidential`) whose answers make a request confidential, and a person question for the business owner (`businessOwnerField`). The standard form asks "Keep this request confidential?".

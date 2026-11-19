@@ -7,6 +7,7 @@ import {
   parseReviewTemplate,
   planStages,
   validateAnswers,
+  workflowFromSettings,
   type Answers,
   type PlannedStage,
   type RequestFormDefinition,
@@ -50,6 +51,8 @@ export interface RequestStore {
   getAsUser(accessToken: string, requestId: string): Promise<DraftRecord | null>;
   /** The organization's own review forms by stage name, unvalidated. Runs with backend privileges. */
   getReviewTemplates(orgId: string): Promise<Record<string, unknown>>;
+  /** The organization's review settings, unvalidated; null when it uses the defaults. */
+  getWorkflowSettings?(orgId: string): Promise<unknown>;
   /**
    * Records who may see the request, then marks the draft as submitted and starts its
    * stages. Visibility is stored first, so a confidential request is never visible
@@ -115,7 +118,8 @@ export function requestRoutes(store: RequestStore) {
 
     // Triage: the tier decides which review stages start.
     const risk = computeRisk(cleaned, form);
-    const stages = planStages(risk.tier, cleaned, new Date(), undefined, await reviewTemplates(store, request.org_id), form);
+    const workflow = workflowFromSettings(store.getWorkflowSettings ? await store.getWorkflowSettings(request.org_id) : null);
+    const stages = planStages(risk.tier, cleaned, new Date(), workflow, await reviewTemplates(store, request.org_id), form);
     try {
       const visibility = { confidential: isConfidential(cleaned, form), businessOwnerEmail: businessOwnerEmail(cleaned, form) };
       const submitted = await store.submit(id, cleaned, risk, stages, visibility);

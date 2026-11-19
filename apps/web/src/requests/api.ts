@@ -10,6 +10,7 @@ import type {
   ReviewTemplate,
   StageDecision,
   StageStatus,
+  WorkflowSettings,
 } from '@app/shared';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -30,12 +31,16 @@ export interface RequestRow {
   requester_id: string;
   /** Visible only to the requester, org admins, the business owner and added viewers. */
   is_confidential: boolean;
+  /** Archived by an org admin; still visible, listed under Archived. */
+  archived_at: string | null;
+  /** In the trash: visible to org admins only, until restored or deleted for good. */
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
   submitted_at: string | null;
 }
 
-const LIST_COLUMNS = 'id,status,service_name,vendor_name:answers->>vendorName,request_type,risk_tier,requester_id,is_confidential,created_at,updated_at,submitted_at,request_stages(status)';
+const LIST_COLUMNS = 'id,status,service_name,vendor_name:answers->>vendorName,request_type,risk_tier,requester_id,is_confidential,archived_at,deleted_at,created_at,updated_at,submitted_at,request_stages(status)';
 
 export type RequestSummary = Omit<RequestRow, 'answers' | 'risk_score' | 'risk_reasons' | 'form'> & {
   /** The vendor answer, when the form asks for it. */
@@ -437,4 +442,45 @@ export async function removeViewer(supabase: SupabaseClient, requestId: string, 
 export async function setConfidential(supabase: SupabaseClient, requestId: string, confidential: boolean): Promise<void> {
   const { error } = await supabase.rpc('set_request_confidential', { p_request_id: requestId, p_confidential: confidential });
   if (error) throw error;
+}
+
+/** The organization's stored review settings (unvalidated), or null for the defaults. */
+export async function loadWorkflowSettings(supabase: SupabaseClient, orgId: string): Promise<unknown> {
+  const { data, error } = await supabase.from('workflow_settings').select('stages').eq('org_id', orgId).maybeSingle<{ stages: unknown }>();
+  if (error) throw error;
+  return data?.stages ?? null;
+}
+
+/** Stage names that have their own review form. */
+export async function customizedReviewForms(supabase: SupabaseClient, orgId: string): Promise<string[]> {
+  const { data, error } = await supabase.from('review_templates').select('stage_name').eq('org_id', orgId);
+  if (error) throw error;
+  return (data as { stage_name: string }[]).map((r) => r.stage_name);
+}
+
+export async function saveWorkflowSettings(supabase: SupabaseClient, stages: WorkflowSettings): Promise<void> {
+  const res = await callApi(supabase, '/v1/workflow', 'PUT', 30_000, { stages });
+  if (!res.ok) throw await apiError(res, 'The review settings could not be saved.');
+}
+
+export async function resetWorkflowSettings(supabase: SupabaseClient): Promise<void> {
+  const res = await callApi(supabase, '/v1/workflow', 'DELETE');
+  if (!res.ok) throw await apiError(res, 'The review settings could not be reset.');
+}
+
+export async function setArchived(supabase: SupabaseClient, requestId: string, archived: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_request_archived', { p_request_id: requestId, p_archived: archived });
+  if (error) throw error;
+}
+
+export async function setTrashed(supabase: SupabaseClient, requestId: string, trashed: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_request_trashed', { p_request_id: requestId, p_trashed: trashed });
+  if (error) throw error;
+}
+
+/** Deletes a request in the trash for good, with its files. Org admins only. */
+export async function deleteForever(supabase: SupabaseClient, requestId: string): Promise<{ filesRemoved: boolean }> {
+  const res = await callApi(supabase, `/v1/requests/${requestId}`, 'DELETE');
+  if (!res.ok) throw await apiError(res, 'The request could not be deleted.');
+  return (await res.json()) as { filesRemoved: boolean };
 }

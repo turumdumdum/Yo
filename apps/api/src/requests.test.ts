@@ -1,4 +1,4 @@
-import type { Answers, PlannedStage, RiskResult } from '@app/shared';
+import { defaultWorkflowSettings, type Answers, type PlannedStage, type RiskResult } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type Visibility } from './requests';
@@ -176,6 +176,17 @@ describe('POST /v1/requests/:id/submit', () => {
     expect(calls[0]!.risk.reasons).toEqual(['Card data?: Yes (+1)', 'Minimum tier Critical: Card data? is Yes']);
     // The form does not ask "Paid or free", so the finance review is not skipped on it.
     expect(calls[0]!.stages.filter((s) => s.status !== 'Not required').map((s) => s.name)).toContain('Finance review');
+  });
+
+  it("plans stages with the organization's review settings", async () => {
+    const settings = defaultWorkflowSettings();
+    settings['Security review'] = { ...settings['Security review']!, requirement: 'never' };
+    settings['Legal review'] = { ...settings['Legal review']!, requirement: 'always', slaBusinessDays: 2, checklist: ['Terms read'] };
+    const { submit, calls } = setup({ id: ID, org_id: ORG, status: 'draft', answers: complete }, { getWorkflowSettings: async () => settings });
+    expect((await submit()).status).toBe(200);
+    const byName = Object.fromEntries(calls[0]!.stages.map((s) => [s.name, s]));
+    expect(byName['Security review']!.note).toBe('Not required: turned off by your organization');
+    expect(byName['Legal review']).toMatchObject({ status: 'In review', slaBusinessDays: 2, checklist: ['Terms read'] });
   });
 
   it('falls back to the standard form when the stored form is broken', async () => {

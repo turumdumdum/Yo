@@ -10,8 +10,13 @@ export interface StageRule {
   name: string;
   /** The stage is required from this risk tier upwards. */
   minTier: RiskTier;
-  /** When set, the stage is also skipped unless the answer has one of these values. */
-  onlyWhen?: { field: string; label: string; in: readonly string[] };
+  /** The organization turned this review off: it is never required. */
+  off?: boolean;
+  /**
+   * When set, the stage is also skipped unless the answer has one of these values. The
+   * label defaults to the question's label in the request's form.
+   */
+  onlyWhen?: { field: string; label?: string; in: readonly string[] };
   slaBusinessDays: number;
   /** What the reviewer confirms before approving. */
   checklist: readonly string[];
@@ -134,19 +139,23 @@ export function planStages(
   /** The form the request used. A condition on a question the form does not ask is ignored. */
   form?: RequestFormDefinition,
 ): PlannedStage[] {
+  const fieldOf = (key: string) => form?.steps.flatMap((s) => s.fields).find((f) => f.key === key);
   const asks = (when: NonNullable<StageRule['onlyWhen']>) => {
     if (!form) return true;
-    const field = form.steps.flatMap((s) => s.fields).find((f) => f.key === when.field);
+    const field = fieldOf(when.field);
     return !!field && 'options' in field && field.options.some((o) => when.in.includes(o.value));
   };
   return config.stages.map((rule) => {
     let note: string | null = null;
-    if (RISK_TIERS.indexOf(tier) < RISK_TIERS.indexOf(rule.minTier)) {
+    if (rule.off) {
+      note = 'Not required: turned off by your organization';
+    } else if (RISK_TIERS.indexOf(tier) < RISK_TIERS.indexOf(rule.minTier)) {
       note = `Not required for ${tier} risk`;
     } else if (rule.onlyWhen && asks(rule.onlyWhen)) {
       const value = answers[rule.onlyWhen.field];
       if (typeof value !== 'string' || !rule.onlyWhen.in.includes(value)) {
-        note = `Not required: ${rule.onlyWhen.label} is ${typeof value === 'string' ? value : 'not answered'}`;
+        const label = fieldOf(rule.onlyWhen.field)?.label ?? rule.onlyWhen.label ?? rule.onlyWhen.field;
+        note = `Not required: ${label} is ${typeof value === 'string' ? value : 'not answered'}`;
       }
     }
     if (note) {

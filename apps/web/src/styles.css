@@ -1836,3 +1836,78 @@ li[data-state='current'] .progress-dot {
   gap: 12px;
   margin-top: 12px;
 }
+
+/* Admin: review cards */
+.review-cards {
+  list-style: none;
+  margin: 16px 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.review-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.review-card.is-off {
+  background: var(--ground);
+}
+.review-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.review-card-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.review-card-summary {
+  margin: 8px 0 4px;
+  font-weight: 600;
+}
+.review-card-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  color: var(--ink-secondary);
+}
+.stage-settings,
+.embedded-editor {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.field.nested {
+  margin: 4px 0 8px 30px;
+}
+.stage-settings input[type='number'] {
+  max-width: 10rem;
+}
+
+/* Archive and trash */
+.view-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -8px 0 16px;
+}
+.lifecycle-banner {
+  border-left: 4px solid var(--ink-tertiary);
+}
+.lifecycle-banner.in-trash {
+  border-left-color: #b3261e;
+  background: var(--status-rejected-bg);
+  color: var(--status-rejected-fg);
+}
+.button-danger {
+  background: #b3261e;
+  border-color: #b3261e;
+  color: #ffffff;
+}

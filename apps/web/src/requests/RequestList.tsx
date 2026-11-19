@@ -6,7 +6,7 @@ const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { 
 const DONE = new Set(['Approved', 'Approved with conditions', 'Rejected']);
 
 /** The four views of the start screen. */
-export type RequestView = 'mine' | 'review' | 'approved' | 'rejected';
+export type RequestView = 'mine' | 'review' | 'approved' | 'rejected' | 'archived' | 'trash';
 
 interface Props {
   requests: RequestSummary[];
@@ -18,36 +18,54 @@ interface Props {
   onOpen: (id: string) => void;
 }
 
+/** Archived and deleted requests leave the main views. */
+const active = (r: RequestSummary) => !r.archived_at && !r.deleted_at;
+
 const VIEWS: { id: RequestView; label: string; icon: string; empty: string; matches: (r: RequestSummary, userId: string) => boolean }[] = [
   {
     id: 'mine',
     label: 'My requests',
     icon: '✎',
     empty: 'You have not started any requests yet.',
-    matches: (r, userId) => r.requester_id === userId,
+    matches: (r, userId) => r.requester_id === userId && active(r),
   },
   {
     id: 'review',
     label: 'Being checked',
     icon: '⏳',
     empty: 'Nothing is being checked right now.',
-    matches: (r) => r.status === 'in_review' || r.status === 'submitted',
+    matches: (r) => (r.status === 'in_review' || r.status === 'submitted') && active(r),
   },
   {
     id: 'approved',
     label: 'Approved vendors',
     icon: '✓',
     empty: 'No vendors have been approved yet.',
-    matches: (r) => r.status === 'approved',
+    matches: (r) => r.status === 'approved' && active(r),
   },
   {
     id: 'rejected',
     label: 'Rejected',
     icon: '✕',
     empty: 'No requests have been rejected.',
-    matches: (r) => r.status === 'rejected',
+    matches: (r) => r.status === 'rejected' && active(r),
+  },
+  {
+    id: 'archived',
+    label: 'Archived',
+    icon: '▤',
+    empty: 'Nothing is archived.',
+    matches: (r) => !!r.archived_at && !r.deleted_at,
+  },
+  {
+    id: 'trash',
+    label: 'Trash',
+    icon: '🗑',
+    empty: 'The trash is empty.',
+    matches: (r) => !!r.deleted_at,
   },
 ];
+const MAIN_VIEWS = VIEWS.slice(0, 4);
 
 function isUrgent(request: RequestSummary, userId: string, awaiting: ReadonlySet<string>): boolean {
   return awaiting.has(request.id) || (request.status === 'draft' && request.requester_id === userId);
@@ -91,7 +109,7 @@ export function RequestList({ requests, userId, awaitingMyAnswer, nameOf, busy, 
   return (
     <>
       <div className="view-tiles" role="group" aria-label="Show">
-        {VIEWS.map((v) => (
+        {MAIN_VIEWS.map((v) => (
           <button key={v.id} type="button" className="view-tile" data-view={v.id} aria-pressed={view === v.id} onClick={() => setView(v.id)}>
             <span className="view-icon" aria-hidden="true">
               {v.icon}
@@ -101,6 +119,17 @@ export function RequestList({ requests, userId, awaitingMyAnswer, nameOf, busy, 
           </button>
         ))}
       </div>
+      {(counts.archived > 0 || counts.trash > 0 || view === 'archived' || view === 'trash') && (
+        <div className="view-more" role="group" aria-label="More">
+          {VIEWS.slice(4)
+            .filter((v) => counts[v.id] > 0 || view === v.id)
+            .map((v) => (
+              <button key={v.id} type="button" className="button button-secondary button-small" aria-pressed={view === v.id} onClick={() => setView(v.id)}>
+                {v.label} <span className="chip-count">{counts[v.id]}</span>
+              </button>
+            ))}
+        </div>
+      )}
       {requests.length > 3 && (
         <div className="field search-field">
           <label htmlFor="request-search" className="visually-hidden">
@@ -139,6 +168,16 @@ export function RequestList({ requests, userId, awaitingMyAnswer, nameOf, busy, 
                       <RequestStatusBadge status={request.status} />
                       {request.risk_tier && <RiskBadge tier={request.risk_tier} />}
                       {request.is_confidential && <span className="status-badge confidential-badge">🔒 Confidential</span>}
+                      {request.archived_at && !request.deleted_at && (
+                        <span className="status-badge" data-tone="idle">
+                          Archived
+                        </span>
+                      )}
+                      {request.deleted_at && (
+                        <span className="status-badge" data-tone="rejected">
+                          In the trash
+                        </span>
+                      )}
                     </span>
                   </span>
                   <span className={`request-next${next.urgent ? ' urgent' : ''}`}>{next.text}</span>
