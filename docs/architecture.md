@@ -98,6 +98,9 @@ CLAUDE.md §2 applies: the core works without AI, the plugin is off by default a
 - Model output is untrusted. Each suggested value passes the same validation as a typed answer, only a fixed list of fields can be suggested, and the backend never writes suggestions to the request: the requester applies them one by one. Remarks are advice and never block submission.
 - One AI call per request every 10 seconds, counted per API process. This is not a substitute for real rate limiting.
 - Not done: a per-organization switch and per-organization keys (needed for the hosted version), audit log entries for AI use, cost limits.
+- The answer check at the end of the request form can propose a corrected answer per remark. Each proposal goes through the same validation as a typed answer (`normalizeAnswer`; a choice must be one of the question's choices) and must change the answer; anything else is dropped. The requester accepts a fix, keeps their own answer, or accepts all; nothing is applied without that click.
+- Organizations configure the check in Admin → AI check (`ai_settings`, written by `PUT /v1/ai-settings` after validation with `parseAiCheckSettings`, audited without the text): extra instructions, the questions to check, and whether fixes are proposed. Only the chosen questions' answers are sent to the provider. The fixed rules (`AI_CHECK_RULES`) and the output schema always come first; the organization's text is appended as guidance and cannot change the format.
+
 
 ## Risk tier
 

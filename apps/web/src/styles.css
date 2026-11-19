@@ -1911,3 +1911,46 @@ li[data-state='current'] .progress-dot {
   border-color: #b3261e;
   color: #ffffff;
 }
+
+/* AI check: proposed fixes */
+.ai-fix {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--accent-tint);
+}
+.ai-fix p {
+  margin: 0 0 8px;
+}
+.ai-accepted {
+  color: var(--status-approved-fg);
+  font-weight: 600;
+}
+.ai-accept-all {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+.ai-accept-all p {
+  margin: 0;
+  flex: 1 1 240px;
+}
+.ai-list li.ai-warning {
+  border-left: 3px solid var(--status-waiting-fg);
+  padding-left: 8px;
+}
+.ai-field-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px 16px;
+}
+.ai-field-step {
+  margin: 8px 0 0;
+  font-weight: 700;
+}

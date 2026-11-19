@@ -1,4 +1,4 @@
-import { ATTACHMENT_BUCKET, type Answers, type OrgRole, type PlannedStage, type ReviewTemplate, type RiskResult, type WorkflowSettings } from '@app/shared';
+import { ATTACHMENT_BUCKET, type AiCheckSettings, type Answers, type OrgRole, type PlannedStage, type ReviewTemplate, type RiskResult, type WorkflowSettings } from '@app/shared';
 import type { AdminStore, Caller, SavedFormInput } from './admin';
 import { InvitationRefused, type InvitationResult, type InvitationStore } from './invitations';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type SubmittedRecord, type Visibility } from './requests';
@@ -63,6 +63,39 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
         body: JSON.stringify({ prefixes: paths }),
       });
       if (!res.ok) throw new Error(`Supabase storage responded ${res.status} when removing files`);
+    },
+
+    async getAiSettings(orgId: string): Promise<unknown> {
+      const res = await fetchImpl(`${rest}/ai_settings?${new URLSearchParams({ org_id: `eq.${orgId}`, select: 'check_settings' })}`, { headers: service });
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when reading AI settings`);
+      const rows = (await res.json()) as { check_settings: unknown }[];
+      return rows[0]?.check_settings ?? null;
+    },
+
+    async saveAiSettings(orgId: string, settings: AiCheckSettings | null, actorId: string): Promise<void> {
+      const res =
+        settings === null
+          ? await fetchImpl(`${rest}/ai_settings?${new URLSearchParams({ org_id: `eq.${orgId}` })}`, { method: 'DELETE', headers: service })
+          : await fetchImpl(`${rest}/ai_settings?on_conflict=org_id`, {
+              method: 'POST',
+              headers: { ...service, prefer: 'resolution=merge-duplicates' },
+              body: JSON.stringify({ org_id: orgId, check_settings: settings, updated_by: actorId, updated_at: new Date().toISOString() }),
+            });
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when saving AI settings`);
+      const audit = await fetchImpl(`${rest}/audit_log`, {
+        method: 'POST',
+        headers: service,
+        body: JSON.stringify({
+          org_id: orgId,
+          actor_id: actorId,
+          action: settings === null ? 'ai_settings.reset' : 'ai_settings.updated',
+          entity_type: 'ai_settings',
+          entity_id: orgId,
+          // The instructions themselves are kept in ai_settings; the log records the change.
+          metadata: settings === null ? {} : { fields: settings.fields.length, propose_fixes: settings.proposeFixes, instructions_length: settings.instructions.length },
+        }),
+      });
+      if (!audit.ok) throw new Error(`Supabase responded ${audit.status} when writing the audit log`);
     },
 
     async getWorkflowSettings(orgId: string): Promise<unknown> {

@@ -101,4 +101,12 @@ describe('archive and trash', () => {
     expect((await asUser(requester, (c) => c.query('select stages from public.workflow_settings'))).rows).toEqual([{ stages: { x: 1 } }]);
     await expect(asUser(admin, (c) => c.query(`update public.workflow_settings set stages = '{}'`))).rejects.toThrow(/permission denied/);
   });
+
+  it('keeps AI settings to org admins and process managers, written by the backend only', async () => {
+    await asService((c) => c.query(`insert into public.ai_settings (org_id, check_settings) values ($1, '{"instructions": "x"}')`, [org]));
+    expect((await asUser(manager, (c) => c.query('select check_settings from public.ai_settings'))).rowCount).toBe(1);
+    expect((await asUser(admin, (c) => c.query('select check_settings from public.ai_settings'))).rowCount).toBe(1);
+    expect((await asUser(requester, (c) => c.query('select check_settings from public.ai_settings'))).rowCount).toBe(0);
+    await expect(asUser(admin, (c) => c.query(`update public.ai_settings set check_settings = '{}'`))).rejects.toThrow(/permission denied/);
+  });
 });

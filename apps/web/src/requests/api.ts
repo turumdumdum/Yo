@@ -1,5 +1,6 @@
 import { ATTACHMENT_BUCKET } from '@app/shared';
 import type {
+  AiCheckSettings,
   AiRemark,
   AiStatus,
   AiSuggestion,
@@ -483,4 +484,21 @@ export async function deleteForever(supabase: SupabaseClient, requestId: string)
   const res = await callApi(supabase, `/v1/requests/${requestId}`, 'DELETE');
   if (!res.ok) throw await apiError(res, 'The request could not be deleted.');
   return (await res.json()) as { filesRemoved: boolean };
+}
+
+/** The organization's stored AI check settings (unvalidated), or null for the defaults. */
+export async function loadAiSettings(supabase: SupabaseClient, orgId: string): Promise<unknown> {
+  const { data, error } = await supabase.from('ai_settings').select('check_settings').eq('org_id', orgId).maybeSingle<{ check_settings: unknown }>();
+  if (error) throw error;
+  return data?.check_settings ?? null;
+}
+
+export async function saveAiSettings(supabase: SupabaseClient, settings: AiCheckSettings): Promise<void> {
+  const res = await callApi(supabase, '/v1/ai-settings', 'PUT', 30_000, settings);
+  if (!res.ok) throw await apiError(res, 'The AI settings could not be saved.');
+}
+
+export async function resetAiSettings(supabase: SupabaseClient): Promise<void> {
+  const res = await callApi(supabase, '/v1/ai-settings', 'DELETE');
+  if (!res.ok) throw await apiError(res, 'The AI settings could not be reset.');
 }

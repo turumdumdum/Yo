@@ -53,6 +53,8 @@ export interface RequestStore {
   getReviewTemplates(orgId: string): Promise<Record<string, unknown>>;
   /** The organization's review settings, unvalidated; null when it uses the defaults. */
   getWorkflowSettings?(orgId: string): Promise<unknown>;
+  /** The organization's AI check settings, unvalidated; null when it uses the defaults. */
+  getAiSettings?(orgId: string): Promise<unknown>;
   /**
    * Records who may see the request, then marks the draft as submitted and starts its
    * stages. Visibility is stored first, so a confidential request is never visible

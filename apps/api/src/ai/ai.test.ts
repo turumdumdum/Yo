@@ -106,7 +106,63 @@ describe('answer check', () => {
   });
 });
 
-function setup(draft: DraftRecord | null, provider?: AiProvider) {
+describe('proposed fixes', () => {
+  const settings = { instructions: 'Flag tools without SSO as a warning.', fields: ['signInMethod', 'dataLocation', 'platforms', 'expectedUsers', 'budgetOwner'], proposeFixes: true };
+
+  it('sends only the chosen questions, with answer formats and the organization guidance after the fixed rules', () => {
+    const task = answerCheckTask(answers, undefined, settings);
+    expect(Object.keys(task.input.answers as object).sort()).toEqual(Object.keys(answers).filter((k) => settings.fields.includes(k)).sort());
+    expect(task.instructions).toContain('signInMethod (Sign-in method; answer format: exactly one of: SSO | Email + password | API key | Shared account)');
+    expect(task.instructions).not.toContain('purpose (');
+    expect(task.instructions.indexOf('Guidance from the organization')).toBeGreaterThan(task.instructions.indexOf('Return at most'));
+    expect(task.instructions).toContain('Flag tools without SSO as a warning.');
+    expect(JSON.stringify(task.input)).not.toContain('Ann Lee');
+    // No chosen question in this form: every question is checked.
+    expect(Object.keys(answerCheckTask(answers, undefined, { ...settings, fields: ['notInForm'] }).input.answers as object).length).toBeGreaterThan(5);
+  });
+
+  it('keeps only fixes that pass validation, change the answer and concern a checked question', () => {
+    const remarks = remarksFromResult(
+      {
+        content: {
+          remarks: [
+            { field: 'signInMethod', severity: 'warning', message: 'Use SSO.', suggestion: 'sso' },
+            { field: 'dataLocation', severity: 'info', message: 'Vague.', suggestion: 'EU (Frankfurt), Germany' },
+            { field: 'platforms', severity: 'info', message: 'Add API.', suggestion: 'Web, API, Teleport' },
+            { field: 'expectedUsers', severity: 'info', message: 'Count.', suggestion: '1,200' },
+            { field: 'budgetOwner', severity: 'info', message: 'Who?', suggestion: 'Bob' },
+            { field: 'purpose', severity: 'info', message: 'Not checked.', suggestion: 'x' },
+            { field: 'dataLocation', severity: 'info', message: 'Same.', suggestion: String(answers.dataLocation ?? '') },
+          ],
+        },
+        basis: [],
+      },
+      undefined,
+      answers,
+      settings,
+    );
+    expect(remarks.map((r) => [r.field, r.suggestion])).toEqual([
+      ['signInMethod', 'SSO'],
+      ['dataLocation', 'EU (Frankfurt), Germany'],
+      ['platforms', undefined],
+      ['expectedUsers', 1200],
+      ['budgetOwner', undefined],
+      [null, undefined],
+      ['dataLocation', undefined],
+    ]);
+    const off = remarksFromResult({ content: { remarks: [{ field: 'signInMethod', severity: 'info', message: 'm', suggestion: 'SSO' }] }, basis: [] }, undefined, answers, { ...settings, proposeFixes: false });
+    expect(off[0]!.suggestion).toBeUndefined();
+  });
+
+  it('uses the organization settings in the check route', async () => {
+    const { provider, tasks } = fakeProvider({ content: { remarks: [{ field: 'signInMethod', severity: 'warning', message: 'SSO?', suggestion: 'SSO' }] }, basis: [] });
+    const { post } = setup({ id: ID, org_id: ID, status: 'draft', answers }, provider, settings);
+    expect(await (await post('check')).json()).toEqual({ remarks: [{ field: 'signInMethod', severity: 'warning', message: 'SSO?', suggestion: 'SSO' }] });
+    expect(tasks[0]!.instructions).toContain('Flag tools without SSO');
+  });
+});
+
+function setup(draft: DraftRecord | null, provider?: AiProvider, aiSettings: unknown = null) {
   const store: RequestStore = {
     async getReviewTemplates() {
       return {};
@@ -116,6 +172,9 @@ function setup(draft: DraftRecord | null, provider?: AiProvider) {
     },
     async submit() {
       throw new Error('not used');
+    },
+    async getAiSettings() {
+      return aiSettings;
     },
   };
   const app = createApp({ requests: store, ai: provider });

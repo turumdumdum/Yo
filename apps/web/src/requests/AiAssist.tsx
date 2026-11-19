@@ -51,7 +51,10 @@ export function AiAssist({ supabase, requestId, provider, mode, form, answers, s
         setSuggestions(found);
         onSuggestions?.(found);
       }
-      else setRemarks(await aiCheck(supabase, requestId));
+      else {
+        setFixState({});
+        setRemarks(await aiCheck(supabase, requestId));
+      }
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -60,6 +63,15 @@ export function AiAssist({ supabase, requestId, provider, mode, form, answers, s
   }
 
   const dismiss = (field: string) => setSuggestions((current) => current?.filter((s) => s.field !== field) ?? null);
+  // Proposed fixes from the check, by remark index: accepted ones are marked, dismissed ones hidden.
+  const [fixState, setFixState] = useState<Record<number, 'accepted' | 'dismissed'>>({});
+  const openFixes = (remarks ?? []).map((r, i) => ({ r, i })).filter(({ r, i }) => r.field && r.suggestion !== undefined && !fixState[i]);
+  const acceptFix = (i: number) => {
+    const r = remarks?.[i];
+    if (!r?.field || r.suggestion === undefined) return;
+    onApply(r.field, r.suggestion);
+    setFixState((s) => ({ ...s, [i]: 'accepted' }));
+  };
   const suggest = mode === 'suggest';
 
   return (
@@ -73,7 +85,7 @@ export function AiAssist({ supabase, requestId, provider, mode, form, answers, s
       <p className="field-hint">
         {suggest
           ? `Optional. Sends the service name, vendor and website to ${provider} and proposes values you can accept or ignore.`
-          : `Optional. Sends your answers, without the names of owners, to ${provider}. Remarks are advice only.`}
+          : `Optional. Sends your answers, without the names of owners, to ${provider}. You decide which proposed fixes to accept.`}
         {busy && ' This can take up to two minutes; you can keep filling in the form meanwhile.'}
       </p>
       <FormError message={error} />
@@ -145,17 +157,60 @@ export function AiAssist({ supabase, requestId, provider, mode, form, answers, s
         </ul>
       )}
 
+      {openFixes.length > 1 && (
+        <div className="ai-accept-all">
+          <p>
+            The AI proposes {openFixes.length} corrected answers. Check them below, or accept them all at once; you can still edit
+            every answer afterwards.
+          </p>
+          <button type="button" className="button button-small" onClick={() => openFixes.forEach(({ i }) => acceptFix(i))}>
+            Accept all {openFixes.length} fixes
+          </button>
+        </div>
+      )}
       {remarks && remarks.length > 0 && (
         <ul className="ai-list">
-          {remarks.map((r, i) => (
-            <li key={i}>
-              <p>
-                <span className="suggested-tag">{r.severity === 'warning' ? 'AI warning' : 'AI tip'}</span>{' '}
-                {r.field && <strong>{fieldLabel(r.field, form)}: </strong>}
-                {r.message}
-              </p>
-            </li>
-          ))}
+          {remarks.map((r, i) => {
+            const field = r.field ? FIELDS.get(r.field) : undefined;
+            const state = fixState[i];
+            return (
+              <li key={i} className={r.severity === 'warning' ? 'ai-warning' : undefined}>
+                <p>
+                  <span className="suggested-tag">{r.severity === 'warning' ? 'AI warning' : 'AI tip'}</span>{' '}
+                  {r.field && <strong>{fieldLabel(r.field, form)}: </strong>}
+                  {r.message}
+                </p>
+                {field && r.suggestion !== undefined && state !== 'dismissed' && (
+                  <div className="ai-fix">
+                    <p>
+                      <span className="stage-meta">Your answer:</span> {formatAnswer(field, answers[field.key])}
+                      <br />
+                      <span className="stage-meta">Proposed:</span> <strong>{formatAnswer(field, r.suggestion)}</strong>
+                    </p>
+                    {state === 'accepted' ? (
+                      <p className="ai-accepted" role="status">
+                        ✓ Accepted. Go to step {stepOfField(field.key, form) + 1} to change it again.
+                      </p>
+                    ) : (
+                      <div className="form-actions">
+                        <button type="button" className="button button-small" aria-label={`Accept the proposed ${field.label}`} onClick={() => acceptFix(i)}>
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-secondary button-small"
+                          aria-label={`Keep my ${field.label}`}
+                          onClick={() => setFixState((s) => ({ ...s, [i]: 'dismissed' }))}
+                        >
+                          Keep mine
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       {suggestions?.length || remarks?.length ? (

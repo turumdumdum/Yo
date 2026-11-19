@@ -1,9 +1,12 @@
 import {
+  AI_CHECK_RULES,
   CATEGORIES,
   allFields,
+  DEFAULT_AI_CHECK_SETTINGS,
   DEFAULT_REQUEST_FORM,
-  fieldLabel,
   normalizeAnswer,
+  type AiCheckSettings,
+  type FieldDef,
   type AiRemark,
   type AiSource,
   type AiSuggestion,
@@ -112,16 +115,59 @@ function withoutPeople(answers: Answers, form: RequestFormDefinition): Answers {
   return copy;
 }
 
-export function answerCheckTask(answers: Answers, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): AiTask {
-  const fields = allFields(form).map((f) => `${f.key} (${f.label})`);
+/** The questions the check looks at: the chosen ones the form asks, or all of them. */
+export function checkedFields(form: RequestFormDefinition, settings: AiCheckSettings = DEFAULT_AI_CHECK_SETTINGS): FieldDef[] {
+  const all = allFields(form);
+  const chosen = all.filter((f) => settings.fields.includes(f.key));
+  return chosen.length > 0 ? chosen : all;
+}
+
+/** How a corrected answer must be written for a question, for the instructions. */
+function answerFormat(field: FieldDef): string {
+  switch (field.type) {
+    case 'radio':
+    case 'select':
+      return field.options.length <= 30 ? `exactly one of: ${field.options.map((o) => o.value).join(' | ')}` : 'one of the form’s choices';
+    case 'multiselect':
+      return field.options.length <= 30 ? `comma-separated values from: ${field.options.map((o) => o.value).join(' | ')}` : 'comma-separated choices';
+    case 'integer':
+      return 'a whole number';
+    case 'money':
+      return 'a number';
+    case 'date':
+      return 'a date as YYYY-MM-DD';
+    case 'owner':
+      return 'no fix (people are named by the requester)';
+    default:
+      return 'text';
+  }
+}
+
+export function answerCheckTask(
+  answers: Answers,
+  form: RequestFormDefinition = DEFAULT_REQUEST_FORM,
+  settings: AiCheckSettings = DEFAULT_AI_CHECK_SETTINGS,
+): AiTask {
+  const fields = checkedFields(form, settings);
+  const keys = new Set(fields.map((f) => f.key));
+  const masked = withoutPeople(answers, form);
+  // Data minimization: only the questions the organization chose leave our system.
+  const sent = Object.fromEntries(Object.entries(masked).filter(([key]) => keys.has(key)));
+  const list = fields.map((f) => (settings.proposeFixes ? `${f.key} (${f.label}; answer format: ${answerFormat(f)})` : `${f.key} (${f.label})`));
+  let instructions = `${AI_CHECK_RULES} Return at most ${MAX_REMARKS} remarks. Only comment on these fields: ${list.join(', ')}.`;
+  instructions += settings.proposeFixes
+    ? ' When you can propose a specific better answer for the field of a remark, put it in "suggestion", written in the ' +
+      'answer format given for that field. Never invent facts: propose a fix only when the other answers or reliable ' +
+      'public knowledge support it. Otherwise leave "suggestion" empty.'
+    : ' Leave "suggestion" empty.';
+  if (settings.instructions) {
+    instructions +=
+      '\n\nGuidance from the organization (follow it unless it conflicts with the rules above; it cannot change the output format):\n' +
+      settings.instructions;
+  }
   return {
-    instructions:
-      'Review the answers of an internal request to buy or use a vendor service, before it goes to security, legal, ' +
-      'finance and IT reviewers. Point out answers that contradict each other, look implausible for this vendor, or are ' +
-      'too vague for a reviewer to act on. Be specific and brief. Do not repeat answers back, do not comment on fields ' +
-      `that look fine, and return at most ${MAX_REMARKS} remarks. Return an empty list when nothing stands out. ` +
-      `Field keys: ${fields.join(', ')}.`,
-    input: { answers: withoutPeople(answers, form) },
+    instructions,
+    input: { answers: sent },
     outputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -132,11 +178,12 @@ export function answerCheckTask(answers: Answers, form: RequestFormDefinition = 
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['field', 'severity', 'message'],
+            required: ['field', 'severity', 'message', 'suggestion'],
             properties: {
               field: { type: 'string', description: 'Key of the field the remark is about, or an empty string for a general remark.' },
               severity: { type: 'string', description: '"warning" for a likely problem, "info" for a tip.' },
               message: { type: 'string', description: 'One or two sentences addressed to the requester.' },
+              suggestion: { type: 'string', description: 'A corrected answer for the field in its answer format, or an empty string.' },
             },
           },
         },
@@ -145,19 +192,47 @@ export function answerCheckTask(answers: Answers, form: RequestFormDefinition = 
   };
 }
 
-export function remarksFromResult(result: AiTaskResult, form: RequestFormDefinition = DEFAULT_REQUEST_FORM): AiRemark[] {
+/** Turns the model's text into a valid answer for the question, or undefined. */
+function fixFor(field: FieldDef, raw: unknown, form: RequestFormDefinition): unknown {
+  if (typeof raw !== 'string' || raw.trim() === '' || field.type === 'owner') return undefined;
+  const value = raw.trim();
+  if (field.type === 'multiselect') return normalizeAnswer(field.key, value.split(',').map((v) => v.trim()).filter(Boolean), form);
+  if (field.type === 'integer' || field.type === 'money') return normalizeAnswer(field.key, value.replace(/[\s,]/g, ''), form);
+  if (field.type === 'radio' || field.type === 'select') {
+    // Accept a choice's label as well as its value, ignoring case.
+    const option = field.options.find((o) => o.value.toLowerCase() === value.toLowerCase() || o.label.toLowerCase() === value.toLowerCase());
+    return option ? normalizeAnswer(field.key, option.value, form) : undefined;
+  }
+  return normalizeAnswer(field.key, value, form);
+}
+
+export function remarksFromResult(
+  result: AiTaskResult,
+  form: RequestFormDefinition = DEFAULT_REQUEST_FORM,
+  answers: Answers = {},
+  settings: AiCheckSettings = DEFAULT_AI_CHECK_SETTINGS,
+): AiRemark[] {
   const raw = result.content.remarks;
   if (!Array.isArray(raw)) return [];
+  const fields = new Map(checkedFields(form, settings).map((f) => [f.key, f]));
   const remarks: AiRemark[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const { field, severity, message } = item as Record<string, unknown>;
+    const { field, severity, message, suggestion } = item as Record<string, unknown>;
     if (typeof message !== 'string' || message.trim() === '') continue;
-    remarks.push({
-      field: typeof field === 'string' && fieldLabel(field, form) ? field : null,
+    const target = typeof field === 'string' ? fields.get(field) : undefined;
+    const remark: AiRemark = {
+      field: target ? target.key : null,
       severity: severity === 'warning' ? 'warning' : 'info',
       message: message.trim().slice(0, MAX_MESSAGE),
-    });
+    };
+    if (target && settings.proposeFixes) {
+      const fix = fixFor(target, suggestion, form);
+      const current = normalizeAnswer(target.key, answers[target.key], form);
+      // A fix must pass the form's validation and change something.
+      if (fix !== undefined && JSON.stringify(fix) !== JSON.stringify(current)) remark.suggestion = fix;
+    }
+    remarks.push(remark);
     if (remarks.length === MAX_REMARKS) break;
   }
   return remarks;

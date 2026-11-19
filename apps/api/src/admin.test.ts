@@ -12,6 +12,7 @@ function setup(caller: Caller | null | Error, failFiles = false) {
   const workflows: { orgId: string; settings: WorkflowSettings | null; actorId: string }[] = [];
   const purged: { id: string; actorId: string }[] = [];
   const removed: string[] = [];
+  const aiSaved: { orgId: string; settings: unknown; actorId: string }[] = [];
   const admin: AdminStore = {
     async createRequestForm(orgId, input) {
       if (input.name === 'Taken') return 'name-taken';
@@ -49,6 +50,9 @@ function setup(caller: Caller | null | Error, failFiles = false) {
       if (id === NOT_IN_TRASH) return 'not-in-trash';
       return 'not-found';
     },
+    async saveAiSettings(orgId, settings, actorId) {
+      aiSaved.push({ orgId, settings, actorId });
+    },
     async removeAttachmentFiles(paths) {
       if (failFiles) throw new Error('storage down');
       removed.push(...paths);
@@ -67,7 +71,7 @@ function setup(caller: Caller | null | Error, failFiles = false) {
       headers: { ...headers, 'content-type': 'application/json' },
       body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
     });
-  return { app, call, saved, forms, formCall, workflows, purged, removed };
+  return { app, call, saved, forms, formCall, workflows, purged, removed, aiSaved };
 }
 
 const orgAdmin: Caller = { userId: 'u1', orgId: 'o1', role: 'org_admin' };
@@ -235,5 +239,29 @@ describe('deleting a request for good', () => {
     expect((await del(setup(orgAdmin).app, NOT_IN_TRASH)).status).toBe(409);
     expect((await del(setup(orgAdmin).app, '55555555-2222-4333-8444-555555555555')).status).toBe(404);
     expect((await del(setup(orgAdmin).app, 'nope')).status).toBe(404);
+  });
+});
+
+describe('AI settings API', () => {
+  const put = (app: ReturnType<typeof setup>['app'], body: unknown) =>
+    app.request('/v1/ai-settings', { method: 'PUT', headers: { authorization: 'Bearer t', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+  it('stores validated settings and resets them', async () => {
+    const { app, aiSaved } = setup(orgAdmin);
+    const res = await put(app, { instructions: '  Flag tools without SSO.  ', fields: ['signInMethod', 'signInMethod', 'purpose'], proposeFixes: true });
+    expect(res.status).toBe(200);
+    expect(aiSaved[0]!.settings).toEqual({ instructions: 'Flag tools without SSO.', fields: ['signInMethod', 'purpose'], proposeFixes: true });
+    expect((await app.request('/v1/ai-settings', { method: 'DELETE', headers: { authorization: 'Bearer t' } })).status).toBe(204);
+    expect(aiSaved[1]!.settings).toBeNull();
+  });
+
+  it('refuses bad settings and requesters', async () => {
+    const { app, aiSaved } = setup(orgAdmin);
+    expect((await put(app, { instructions: 'x'.repeat(4001), fields: [], proposeFixes: true })).status).toBe(422);
+    expect((await put(app, { instructions: '', fields: ['1bad'], proposeFixes: true })).status).toBe(422);
+    expect((await put(app, { instructions: '', fields: [], proposeFixes: 'yes' })).status).toBe(422);
+    expect((await put(app, { instructions: '', fields: [], proposeFixes: true, model: 'x' })).status).toBe(422);
+    expect(aiSaved).toEqual([]);
+    expect((await put(setup({ ...orgAdmin, role: 'requester' }).app, { instructions: '', fields: [], proposeFixes: true })).status).toBe(403);
   });
 });

@@ -2,7 +2,9 @@ import {
   DEFAULT_STAGES,
   parseRequestForm,
   parseReviewTemplate,
+  parseAiCheckSettings,
   parseWorkflowSettings,
+  type AiCheckSettings,
   type WorkflowSettings,
   type OrgRole,
   type RequestFormDefinition,
@@ -43,6 +45,8 @@ export interface AdminStore {
   purgeRequest(requestId: string, actorId: string): Promise<string[] | 'not-found' | 'not-in-trash' | 'forbidden'>;
   /** Removes files from private storage. */
   removeAttachmentFiles(paths: string[]): Promise<void>;
+  /** Stores the AI check settings; null returns to the defaults. Audited. */
+  saveAiSettings(orgId: string, settings: AiCheckSettings | null, actorId: string): Promise<void>;
 }
 
 export interface SavedFormInput {
@@ -115,6 +119,30 @@ export function adminRoutes(store: AdminStore) {
       }
     }
     return c.json({ deleted: true, filesRemoved });
+  });
+
+  routes.put('/ai-settings', async (c) => {
+    const caller = await manager(c, 'AI settings');
+    if (caller instanceof Response) return caller;
+    const raw = await c.req.text();
+    if (raw.length > 20_000) return c.json({ error: 'The settings are too large' }, 413);
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return c.json({ error: 'Expected JSON' }, 400);
+    }
+    const parsed = parseAiCheckSettings(body);
+    if ('error' in parsed) return c.json({ error: parsed.error }, 422);
+    await store.saveAiSettings(caller.orgId, parsed.settings, caller.userId);
+    return c.json(parsed.settings);
+  });
+
+  routes.delete('/ai-settings', async (c) => {
+    const caller = await manager(c, 'AI settings');
+    if (caller instanceof Response) return caller;
+    await store.saveAiSettings(caller.orgId, null, caller.userId);
+    return c.body(null, 204);
   });
 
   routes.put('/workflow', async (c) => {

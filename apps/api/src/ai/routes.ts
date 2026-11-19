@@ -1,4 +1,4 @@
-import type { AiStatus } from '@app/shared';
+import { DEFAULT_AI_CHECK_SETTINGS, parseAiCheckSettings, type AiCheckSettings, type AiStatus } from '@app/shared';
 import { Hono, type Context } from 'hono';
 import { formOf, UnauthorizedError, type DraftRecord, type RequestStore } from '../requests';
 import { answerCheckTask, remarksFromResult, suggestionsFromResult, vendorLookupTask } from './assist';
@@ -13,6 +13,16 @@ const MIN_INTERVAL_MS = 10_000;
 export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) {
   const routes = new Hono();
   const lastCall = new Map<string, number>();
+
+  /** The organization's settings for the check; stored settings that fail validation are ignored. */
+  async function checkSettings(orgId: string): Promise<AiCheckSettings> {
+    const stored = store.getAiSettings ? await store.getAiSettings(orgId) : null;
+    if (stored === null || stored === undefined) return DEFAULT_AI_CHECK_SETTINGS;
+    const parsed = parseAiCheckSettings(stored);
+    if ('settings' in parsed) return parsed.settings;
+    console.warn(`Ignoring the stored AI settings of organization ${orgId}: ${parsed.error}`);
+    return DEFAULT_AI_CHECK_SETTINGS;
+  }
 
   routes.get('/ai', (c) => c.json({ enabled: provider !== undefined, provider: provider?.name ?? null } satisfies AiStatus));
 
@@ -78,7 +88,8 @@ export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) 
     const limited = throttled(c, request.id);
     if (limited) return limited;
     const form = formOf(request);
-    return run(c, answerCheckTask(request.answers, form), (result) => ({ remarks: remarksFromResult(result, form) }));
+    const settings = await checkSettings(request.org_id);
+    return run(c, answerCheckTask(request.answers, form, settings), (result) => ({ remarks: remarksFromResult(result, form, request.answers, settings) }));
   });
 
   return routes;
