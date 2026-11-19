@@ -21,6 +21,8 @@ import { InviteSection } from './InviteSection';
 import { RequestFormsSection } from './RequestFormEditor';
 import { ReviewsSection } from './ReviewsSection';
 import { AiSettingsSection } from './AiSettingsSection';
+import { ExceptionsSection } from './ExceptionsSection';
+import { SecurityBaselineSection } from './SecurityBaselineSection';
 
 interface Props {
   supabase: SupabaseClient;
@@ -31,13 +33,15 @@ interface Props {
   onChanged: () => Promise<void> | void;
 }
 
-type AdminSection = 'people' | 'domains' | 'request-form' | 'review-forms' | 'ai' | 'settings';
+type AdminSection = 'people' | 'domains' | 'request-form' | 'review-forms' | 'baseline' | 'exceptions' | 'ai' | 'settings';
 
 const SECTIONS: { id: AdminSection; label: string; hint: string }[] = [
   { id: 'people', label: 'People', hint: 'Members, roles and invitations' },
   { id: 'domains', label: 'Email domains', hint: 'Who may be invited' },
   { id: 'request-form', label: 'Request form', hint: 'Questions requesters answer' },
   { id: 'review-forms', label: 'Reviews', hint: 'Which checks run, and their forms' },
+  { id: 'baseline', label: 'Security baseline', hint: 'Configuration every service must have' },
+  { id: 'exceptions', label: 'Exceptions', hint: 'Accepted risks and their end dates' },
   { id: 'ai', label: 'AI check', hint: 'Instructions and questions for the AI' },
   { id: 'settings', label: 'Settings', hint: 'Review rules' },
 ];
@@ -255,6 +259,10 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
         {section === 'request-form' && <RequestFormsSection supabase={supabase} orgId={organization.id} />}
 
         {section === 'review-forms' && <ReviewsSection supabase={supabase} orgId={organization.id} />}
+
+        {section === 'baseline' && <SecurityBaselineSection supabase={supabase} orgId={organization.id} />}
+
+        {section === 'exceptions' && <ExceptionsSection supabase={supabase} orgId={organization.id} userId={userId} members={members} />}
 
         {section === 'ai' && <AiSettingsSection supabase={supabase} orgId={organization.id} />}
 

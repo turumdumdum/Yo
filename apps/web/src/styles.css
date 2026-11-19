@@ -1954,3 +1954,95 @@ li[data-state='current'] .progress-dot {
   margin: 8px 0 0;
   font-weight: 700;
 }
+
+/* Security baseline and exceptions */
+.config-group h3 {
+  margin: 20px 0 8px;
+  font-size: 16px;
+}
+.config-list,
+.exception-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.config-item,
+.exception-item {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.config-item.is-done {
+  background: var(--status-approved-bg);
+  border-color: transparent;
+}
+.config-head,
+.exception-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.config-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.config-title input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+.config-text {
+  margin: 6px 0 4px;
+}
+.config-actions {
+  margin-top: 8px;
+}
+.config-actions button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+.exception-form,
+.control-editor {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--ground);
+}
+.exception-item.state-pending,
+.exception-item.state-expiring {
+  border-left: 4px solid var(--status-waiting-fg);
+}
+.exception-item.state-expired {
+  border-left: 4px solid #b3261e;
+}
+.exception-facts {
+  display: grid;
+  grid-template-columns: minmax(8rem, max-content) 1fr;
+  gap: 4px 12px;
+  margin: 10px 0;
+  font-size: 14px;
+}
+.exception-facts dt {
+  color: var(--ink-tertiary);
+}
+.exception-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 480px) {
+  .exception-facts {
+    grid-template-columns: 1fr;
+  }
+  .exception-facts dd {
+    margin-bottom: 6px;
+  }
+}
+.security-config .progress-track {
+  margin: 8px 0 12px;
+}

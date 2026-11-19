@@ -42,12 +42,14 @@ describe('supabaseRequestStore', () => {
       [{ name: 'License check', status: 'In review', slaBusinessDays: 5, slaDueAt: '2026-11-20T15:30:00.000Z', note: null, checklist: ['Terms ok'], reviewFields: [], reviewRules: [] }],
       { confidential: true, businessOwnerEmail: 'bo@acme.example' },
     );
-    // Visibility first, so the request is never visible without it.
-    expect(calls[0]!.url).toBe('https://project.supabase.co/rest/v1/rpc/set_request_confidentiality');
-    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ p_request_id: ID, p_confidential: true, p_business_owner_email: 'bo@acme.example' });
-    expect(calls[1]!.url).toBe('https://project.supabase.co/rest/v1/rpc/submit_request');
-    expect((calls[1]!.init!.headers as Record<string, string>).apikey).toBe('secret-key');
-    expect(JSON.parse(calls[1]!.init!.body as string)).toEqual({
+    // Controls and visibility first, so the request is never visible without them.
+    expect(calls[0]!.url).toBe('https://project.supabase.co/rest/v1/rpc/set_request_config_requirements');
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ p_request_id: ID, p_items: [] });
+    expect(calls[1]!.url).toBe('https://project.supabase.co/rest/v1/rpc/set_request_confidentiality');
+    expect(JSON.parse(calls[1]!.init!.body as string)).toEqual({ p_request_id: ID, p_confidential: true, p_business_owner_email: 'bo@acme.example' });
+    expect(calls[2]!.url).toBe('https://project.supabase.co/rest/v1/rpc/submit_request');
+    expect((calls[2]!.init!.headers as Record<string, string>).apikey).toBe('secret-key');
+    expect(JSON.parse(calls[2]!.init!.body as string)).toEqual({
       p_request_id: ID,
       p_answers: { serviceName: 'A' },
       p_risk_tier: 'Low',

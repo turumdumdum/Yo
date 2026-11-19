@@ -112,6 +112,15 @@ CLAUDE.md §2 applies: the core works without AI, the plugin is off by default a
 - At least one review must always be needed without a condition; otherwise a request could end up with no checks and never get a decision.
 - In the Admin "Reviews" section each review is a card with these settings and its review form (`review_templates`).
 
+## Security baseline and exceptions
+
+- The security baseline (`packages/shared/src/securityBaseline.ts`) is a catalog of configuration controls (SSO, MFA, deprovisioning, admin roles, shared accounts, API keys, audit logs, encryption, data location, retention, AI training, integrations, data export). Each control is required or recommended and applies from a risk tier and, optionally, when an answer has certain values. Organizations edit it in Admin → Security baseline (`security_baselines`, `PUT /v1/security-baseline`, validated, audited). The default wording is ours, cites no clause numbers, and is a starting point, not a certification guarantee.
+- At submission the controls that apply are copied into `requests.config_requirements` (backend only, while the request is a draft), so later baseline changes never alter a request.
+- The security reviewer decides on each control (`set_config_decision`): must be configured, not applicable (reason required), or an exception. Approving the security review requires a decision on every required control, no exception waiting, an approved and unexpired exception for every control marked as an exception, and "Approved with conditions" when exceptions apply (`private.security_config_problem`, called from `decide_stage`).
+- Exceptions (`review_exceptions`) record the deviation, business reason, compensating measures, remaining risk and an end date at most a year away. They are requested by the security reviewer and accepted or refused by an org admin other than the person who asked (separation of duties). Org admins can revoke them; the person who asked can withdraw a pending one. Revoking on an approved request makes the control a configuration task again. One open exception per control and request. Everything is audited.
+- After approval, the required controls are configuration tasks; the requester, the business owner or a manager confirms each one (`confirm_configuration`), with who and when recorded.
+- Admin → Exceptions is the register: exceptions waiting for a decision, ending within 30 days or expired come first. Expiry does not change the stored status yet; reminders arrive with the job queue.
+
 ## Archive and trash
 
 - Org admins can archive approved or rejected requests (`set_request_archived`) and move them to the trash (`set_request_trashed`); both are reversible and audited. Requests still in review cannot be archived or trashed, so no open check is left behind.

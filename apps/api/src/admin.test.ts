@@ -1,4 +1,4 @@
-import { defaultWorkflowSettings, DEFAULT_REQUEST_FORM, DEFAULT_REVIEW_TEMPLATES, type ReviewTemplate, type WorkflowSettings } from '@app/shared';
+import { defaultWorkflowSettings, DEFAULT_REQUEST_FORM, DEFAULT_SECURITY_BASELINE, DEFAULT_REVIEW_TEMPLATES, type ReviewTemplate, type WorkflowSettings } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 import type { AdminStore, Caller, SavedFormInput } from './admin';
 import { createApp } from './app';
@@ -13,6 +13,7 @@ function setup(caller: Caller | null | Error, failFiles = false) {
   const purged: { id: string; actorId: string }[] = [];
   const removed: string[] = [];
   const aiSaved: { orgId: string; settings: unknown; actorId: string }[] = [];
+  const baselines: { orgId: string; baseline: unknown; actorId: string }[] = [];
   const admin: AdminStore = {
     async createRequestForm(orgId, input) {
       if (input.name === 'Taken') return 'name-taken';
@@ -53,6 +54,9 @@ function setup(caller: Caller | null | Error, failFiles = false) {
     async saveAiSettings(orgId, settings, actorId) {
       aiSaved.push({ orgId, settings, actorId });
     },
+    async saveSecurityBaseline(orgId, baseline, actorId) {
+      baselines.push({ orgId, baseline, actorId });
+    },
     async removeAttachmentFiles(paths) {
       if (failFiles) throw new Error('storage down');
       removed.push(...paths);
@@ -71,7 +75,7 @@ function setup(caller: Caller | null | Error, failFiles = false) {
       headers: { ...headers, 'content-type': 'application/json' },
       body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
     });
-  return { app, call, saved, forms, formCall, workflows, purged, removed, aiSaved };
+  return { app, call, saved, forms, formCall, workflows, purged, removed, aiSaved, baselines };
 }
 
 const orgAdmin: Caller = { userId: 'u1', orgId: 'o1', role: 'org_admin' };
@@ -263,5 +267,29 @@ describe('AI settings API', () => {
     expect((await put(app, { instructions: '', fields: [], proposeFixes: true, model: 'x' })).status).toBe(422);
     expect(aiSaved).toEqual([]);
     expect((await put(setup({ ...orgAdmin, role: 'requester' }).app, { instructions: '', fields: [], proposeFixes: true })).status).toBe(403);
+  });
+});
+
+describe('security baseline API', () => {
+  const put = (app: ReturnType<typeof setup>['app'], body: unknown) =>
+    app.request('/v1/security-baseline', { method: 'PUT', headers: { authorization: 'Bearer t', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+  it('stores a validated baseline and resets it', async () => {
+    const { app, baselines } = setup(orgAdmin);
+    const controls = [...DEFAULT_SECURITY_BASELINE.controls, { id: 'vpn', title: ' Only from the office network ', requirement: 'IP allow-list set.', verification: '', category: 'Identity & access', level: 'recommended', minTier: 'High', when: null }];
+    const res = await put(app, { controls });
+    expect(res.status).toBe(200);
+    expect((baselines[0]!.baseline as { controls: { title: string }[] }).controls.at(-1)!.title).toBe('Only from the office network');
+    expect((await app.request('/v1/security-baseline', { method: 'DELETE', headers: { authorization: 'Bearer t' } })).status).toBe(204);
+    expect(baselines[1]!.baseline).toBeNull();
+  });
+
+  it('explains a broken baseline and refuses requesters', async () => {
+    const { app, baselines } = setup(orgAdmin);
+    const res = await put(app, { controls: [{ ...DEFAULT_SECURITY_BASELINE.controls[0]!, id: 'Bad Key' }] });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: string }).error).toMatch(/invalid key/);
+    expect(baselines).toEqual([]);
+    expect((await put(setup({ ...orgAdmin, role: 'reviewer' }).app, DEFAULT_SECURITY_BASELINE)).status).toBe(403);
   });
 });

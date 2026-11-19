@@ -1,4 +1,4 @@
-import { ATTACHMENT_BUCKET, type AiCheckSettings, type Answers, type OrgRole, type PlannedStage, type ReviewTemplate, type RiskResult, type WorkflowSettings } from '@app/shared';
+import { ATTACHMENT_BUCKET, type AiCheckSettings, type ConfigRequirement, type SecurityBaseline, type Answers, type OrgRole, type PlannedStage, type ReviewTemplate, type RiskResult, type WorkflowSettings } from '@app/shared';
 import type { AdminStore, Caller, SavedFormInput } from './admin';
 import { InvitationRefused, type InvitationResult, type InvitationStore } from './invitations';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type SubmittedRecord, type Visibility } from './requests';
@@ -63,6 +63,38 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
         body: JSON.stringify({ prefixes: paths }),
       });
       if (!res.ok) throw new Error(`Supabase storage responded ${res.status} when removing files`);
+    },
+
+    async getSecurityBaseline(orgId: string): Promise<unknown> {
+      const res = await fetchImpl(`${rest}/security_baselines?${new URLSearchParams({ org_id: `eq.${orgId}`, select: 'controls' })}`, { headers: service });
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when reading the security baseline`);
+      const rows = (await res.json()) as { controls: unknown }[];
+      return rows[0] ? { controls: rows[0].controls } : null;
+    },
+
+    async saveSecurityBaseline(orgId: string, baseline: SecurityBaseline | null, actorId: string): Promise<void> {
+      const res =
+        baseline === null
+          ? await fetchImpl(`${rest}/security_baselines?${new URLSearchParams({ org_id: `eq.${orgId}` })}`, { method: 'DELETE', headers: service })
+          : await fetchImpl(`${rest}/security_baselines?on_conflict=org_id`, {
+              method: 'POST',
+              headers: { ...service, prefer: 'resolution=merge-duplicates' },
+              body: JSON.stringify({ org_id: orgId, controls: baseline.controls, updated_by: actorId, updated_at: new Date().toISOString() }),
+            });
+      if (!res.ok) throw new Error(`Supabase responded ${res.status} when saving the security baseline`);
+      const audit = await fetchImpl(`${rest}/audit_log`, {
+        method: 'POST',
+        headers: service,
+        body: JSON.stringify({
+          org_id: orgId,
+          actor_id: actorId,
+          action: baseline === null ? 'security_baseline.reset' : 'security_baseline.updated',
+          entity_type: 'security_baseline',
+          entity_id: orgId,
+          metadata: baseline === null ? {} : { controls: baseline.controls.length, required: baseline.controls.filter((c) => c.level === 'required').length },
+        }),
+      });
+      if (!audit.ok) throw new Error(`Supabase responded ${audit.status} when writing the audit log`);
     },
 
     async getAiSettings(orgId: string): Promise<unknown> {
@@ -271,7 +303,24 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
       return 'ok' as const;
     },
 
-    async submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[], visibility?: Visibility): Promise<SubmittedRecord> {
+    async submit(
+      requestId: string,
+      answers: Answers,
+      risk: RiskResult,
+      stages: PlannedStage[],
+      visibility?: Visibility,
+      configRequirements: ConfigRequirement[] = [],
+    ): Promise<SubmittedRecord> {
+      const controls = await fetchImpl(`${rest}/rpc/set_request_config_requirements`, {
+        method: 'POST',
+        headers: service,
+        body: JSON.stringify({ p_request_id: requestId, p_items: configRequirements }),
+      });
+      if (!controls.ok) {
+        const body = (await controls.json().catch(() => null)) as { message?: string } | null;
+        if (body?.message?.includes('not a draft')) throw new NotADraftError();
+        throw new Error(`Supabase responded ${controls.status} when recording the configuration controls`);
+      }
       const visible = await fetchImpl(`${rest}/rpc/set_request_confidentiality`, {
         method: 'POST',
         headers: service,

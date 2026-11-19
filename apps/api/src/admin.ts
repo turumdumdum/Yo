@@ -3,6 +3,8 @@ import {
   parseRequestForm,
   parseReviewTemplate,
   parseAiCheckSettings,
+  parseSecurityBaseline,
+  type SecurityBaseline,
   parseWorkflowSettings,
   type AiCheckSettings,
   type WorkflowSettings,
@@ -47,6 +49,8 @@ export interface AdminStore {
   removeAttachmentFiles(paths: string[]): Promise<void>;
   /** Stores the AI check settings; null returns to the defaults. Audited. */
   saveAiSettings(orgId: string, settings: AiCheckSettings | null, actorId: string): Promise<void>;
+  /** Stores the security baseline; null returns to the standard one. Audited. */
+  saveSecurityBaseline(orgId: string, baseline: SecurityBaseline | null, actorId: string): Promise<void>;
 }
 
 export interface SavedFormInput {
@@ -119,6 +123,30 @@ export function adminRoutes(store: AdminStore) {
       }
     }
     return c.json({ deleted: true, filesRemoved });
+  });
+
+  routes.put('/security-baseline', async (c) => {
+    const caller = await manager(c, 'the security baseline');
+    if (caller instanceof Response) return caller;
+    const raw = await c.req.text();
+    if (raw.length > MAX_BODY_BYTES) return c.json({ error: 'The baseline is too large' }, 413);
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return c.json({ error: 'Expected JSON' }, 400);
+    }
+    const parsed = parseSecurityBaseline(body);
+    if ('error' in parsed) return c.json({ error: parsed.error }, 422);
+    await store.saveSecurityBaseline(caller.orgId, parsed.baseline, caller.userId);
+    return c.json(parsed.baseline);
+  });
+
+  routes.delete('/security-baseline', async (c) => {
+    const caller = await manager(c, 'the security baseline');
+    if (caller instanceof Response) return caller;
+    await store.saveSecurityBaseline(caller.orgId, null, caller.userId);
+    return c.body(null, 204);
   });
 
   routes.put('/ai-settings', async (c) => {

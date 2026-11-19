@@ -1,4 +1,4 @@
-import { defaultWorkflowSettings, type Answers, type PlannedStage, type RiskResult } from '@app/shared';
+import { defaultWorkflowSettings, type Answers, type ConfigRequirement, type PlannedStage, type RiskResult } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type Visibility } from './requests';
@@ -39,7 +39,7 @@ const complete: Answers = {
 };
 
 function setup(draft: DraftRecord | null, overrides: Partial<RequestStore> = {}) {
-  const calls: { id: string; answers: Answers; risk: RiskResult; stages: PlannedStage[]; visibility?: Visibility }[] = [];
+  const calls: { id: string; answers: Answers; risk: RiskResult; stages: PlannedStage[]; visibility?: Visibility; controls?: ConfigRequirement[] }[] = [];
   const tokens: string[] = [];
   const store: RequestStore = {
     async getReviewTemplates() {
@@ -49,8 +49,8 @@ function setup(draft: DraftRecord | null, overrides: Partial<RequestStore> = {})
       tokens.push(token);
       return draft;
     },
-    async submit(id, answers, risk, stages, visibility) {
-      calls.push({ id, answers, risk, stages, visibility });
+    async submit(id, answers, risk, stages, visibility, controls) {
+      calls.push({ id, answers, risk, stages, visibility, controls });
       return {
         id,
         status: 'in_review',
@@ -187,6 +187,22 @@ describe('POST /v1/requests/:id/submit', () => {
     const byName = Object.fromEntries(calls[0]!.stages.map((s) => [s.name, s]));
     expect(byName['Security review']!.note).toBe('Not required: turned off by your organization');
     expect(byName['Legal review']).toMatchObject({ status: 'In review', slaBusinessDays: 2, checklist: ['Terms read'] });
+  });
+
+  it('copies the security controls that apply, undecided', async () => {
+    // complete: Restricted data, High risk, platforms Web + API, no personal data.
+    const { submit, calls } = setup({ id: ID, org_id: ORG, status: 'draft', answers: complete });
+    await submit();
+    const ids = calls[0]!.controls!.map((c) => c.id);
+    expect(ids).toEqual(expect.arrayContaining(['sso', 'mfa', 'audit-logs', 'encryption']));
+    expect(ids).not.toContain('data-location');
+    expect(calls[0]!.controls!.every((c) => c.decision === null && !c.configured)).toBe(true);
+    const custom = setup(
+      { id: ID, org_id: ORG, status: 'draft', answers: complete },
+      { getSecurityBaseline: async () => ({ controls: [{ id: 'vpn', title: 'VPN', requirement: 'r', verification: '', category: 'Identity & access', level: 'required', minTier: 'Low', when: null }] }) },
+    );
+    await custom.submit();
+    expect(custom.calls[0]!.controls!.map((c) => c.id)).toEqual(['vpn']);
   });
 
   it('falls back to the standard form when the stored form is broken', async () => {

@@ -13,6 +13,7 @@ import { StageList } from './StageList';
 import type { ReviewContext } from './StagePanel';
 import { Visibility } from './Visibility';
 import { Lifecycle } from './Lifecycle';
+import { SecurityConfig } from './SecurityConfig';
 
 const formatDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -124,6 +125,8 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
           )}
         </section>
       )}
+
+      {request.status !== 'draft' && <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} />}
 
       {request.status !== 'draft' && <Visibility supabase={supabase} request={request} context={context} onChanged={reload} />}
 

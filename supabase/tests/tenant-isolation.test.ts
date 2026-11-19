@@ -7,7 +7,7 @@ import { asAnon, asUser, createUser, pool, resetDatabase } from './db';
 /** The organization column of a table, readable by every signed-in member. */
 const column = (table: string) => (table === 'organizations' ? 'id' : 'org_id');
 
-const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments', 'request_form_templates', 'request_viewers', 'workflow_settings', 'ai_settings'];
+const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments', 'request_form_templates', 'request_viewers', 'workflow_settings', 'ai_settings', 'security_baselines', 'review_exceptions'];
 
 let adminA: string; // org admin of org A
 let requesterA: string; // requester in org A
@@ -87,6 +87,11 @@ beforeAll(async () => {
   );
   await pool.query(`insert into public.workflow_settings (org_id, stages) values ($1, '{}'), ($2, '{}')`, [orgA, orgB]);
   await pool.query(`insert into public.ai_settings (org_id, check_settings) values ($1, '{}'), ($2, '{}')`, [orgA, orgB]);
+  await pool.query(`insert into public.security_baselines (org_id, controls) values ($1, '[]'), ($2, '[]')`, [orgA, orgB]);
+  await pool.query(
+    `insert into public.review_exceptions (org_id, request_id, control_id, control_title, deviation, justification, compensating_controls, risk_level, expires_on)
+     select r.org_id, r.id, 'sso', 'SSO', 'd', 'j', 'c', 'Low', current_date + 30 from public.requests r`,
+  );
 });
 
 afterAll(async () => {

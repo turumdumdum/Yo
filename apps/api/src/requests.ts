@@ -1,6 +1,11 @@
 import {
   businessOwnerEmail,
   computeRisk,
+  configRequirementsFor,
+  DEFAULT_SECURITY_BASELINE,
+  parseSecurityBaseline,
+  type ConfigRequirement,
+  type SecurityBaseline,
   isConfidential,
   DEFAULT_REQUEST_FORM,
   parseRequestForm,
@@ -53,6 +58,8 @@ export interface RequestStore {
   getReviewTemplates(orgId: string): Promise<Record<string, unknown>>;
   /** The organization's review settings, unvalidated; null when it uses the defaults. */
   getWorkflowSettings?(orgId: string): Promise<unknown>;
+  /** The organization's security baseline, unvalidated; null when it uses the standard one. */
+  getSecurityBaseline?(orgId: string): Promise<unknown>;
   /** The organization's AI check settings, unvalidated; null when it uses the defaults. */
   getAiSettings?(orgId: string): Promise<unknown>;
   /**
@@ -60,7 +67,14 @@ export interface RequestStore {
    * stages. Visibility is stored first, so a confidential request is never visible
    * without it. Runs with backend privileges.
    */
-  submit(requestId: string, answers: Answers, risk: RiskResult, stages: PlannedStage[], visibility?: Visibility): Promise<SubmittedRecord>;
+  submit(
+    requestId: string,
+    answers: Answers,
+    risk: RiskResult,
+    stages: PlannedStage[],
+    visibility?: Visibility,
+    configRequirements?: ConfigRequirement[],
+  ): Promise<SubmittedRecord>;
 }
 
 export interface Visibility {
@@ -88,6 +102,16 @@ export async function reviewTemplates(store: RequestStore, orgId: string): Promi
     else console.warn(`Ignoring the stored review form of "${stage}": ${parsed.error}`);
   }
   return valid;
+}
+
+/** The organization's baseline; a stored one that fails validation falls back to the standard one. */
+async function securityBaseline(store: RequestStore, orgId: string): Promise<SecurityBaseline> {
+  const stored = store.getSecurityBaseline ? await store.getSecurityBaseline(orgId) : null;
+  if (stored === null || stored === undefined) return DEFAULT_SECURITY_BASELINE;
+  const parsed = parseSecurityBaseline(stored);
+  if ('baseline' in parsed) return parsed.baseline;
+  console.warn(`Ignoring the stored security baseline of organization ${orgId}: ${parsed.error}`);
+  return DEFAULT_SECURITY_BASELINE;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -124,7 +148,8 @@ export function requestRoutes(store: RequestStore) {
     const stages = planStages(risk.tier, cleaned, new Date(), workflow, await reviewTemplates(store, request.org_id), form);
     try {
       const visibility = { confidential: isConfidential(cleaned, form), businessOwnerEmail: businessOwnerEmail(cleaned, form) };
-      const submitted = await store.submit(id, cleaned, risk, stages, visibility);
+      const controls = configRequirementsFor(await securityBaseline(store, request.org_id), risk.tier, cleaned);
+      const submitted = await store.submit(id, cleaned, risk, stages, visibility, controls);
       return c.json({
         id: submitted.id,
         status: submitted.status,

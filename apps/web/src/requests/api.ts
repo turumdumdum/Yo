@@ -1,6 +1,9 @@
 import { ATTACHMENT_BUCKET } from '@app/shared';
 import type {
   AiCheckSettings,
+  ConfigRequirement,
+  ExceptionStatus,
+  SecurityBaseline,
   AiRemark,
   AiStatus,
   AiSuggestion,
@@ -36,6 +39,8 @@ export interface RequestRow {
   archived_at: string | null;
   /** In the trash: visible to org admins only, until restored or deleted for good. */
   deleted_at: string | null;
+  /** Security baseline controls that applied at submission, with decisions and configuration state. */
+  config_requirements?: ConfigRequirement[];
   created_at: string;
   updated_at: string;
   submitted_at: string | null;
@@ -501,4 +506,105 @@ export async function saveAiSettings(supabase: SupabaseClient, settings: AiCheck
 export async function resetAiSettings(supabase: SupabaseClient): Promise<void> {
   const res = await callApi(supabase, '/v1/ai-settings', 'DELETE');
   if (!res.ok) throw await apiError(res, 'The AI settings could not be reset.');
+}
+
+// ---------------------------------------------------------------------------
+// Security baseline and exceptions
+// ---------------------------------------------------------------------------
+
+export interface ReviewException {
+  id: string;
+  request_id: string;
+  control_id: string;
+  control_title: string;
+  deviation: string;
+  justification: string;
+  compensating_controls: string;
+  risk_level: string;
+  expires_on: string;
+  status: ExceptionStatus;
+  requested_by: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_comment: string | null;
+  created_at: string;
+  requests?: { service_name: string | null };
+}
+
+const EXCEPTION_COLUMNS =
+  'id,request_id,control_id,control_title,deviation,justification,compensating_controls,risk_level,expires_on,status,requested_by,decided_by,decided_at,decision_comment,created_at';
+
+export async function listExceptions(supabase: SupabaseClient, requestId: string): Promise<ReviewException[]> {
+  const { data, error } = await supabase.from('review_exceptions').select(EXCEPTION_COLUMNS).eq('request_id', requestId).order('created_at');
+  if (error) throw error;
+  return data as ReviewException[];
+}
+
+/** Every exception the caller can see in the organization, soonest expiry first. */
+export async function listOrgExceptions(supabase: SupabaseClient, orgId: string): Promise<ReviewException[]> {
+  const { data, error } = await supabase
+    .from('review_exceptions')
+    .select(`${EXCEPTION_COLUMNS},requests(service_name)`)
+    .eq('org_id', orgId)
+    .order('expires_on');
+  if (error) throw error;
+  return data as unknown as ReviewException[];
+}
+
+export async function setConfigDecision(supabase: SupabaseClient, requestId: string, controlId: string | null, decision: 'required' | 'not_applicable' | null, note: string | null): Promise<void> {
+  const { error } = await supabase.rpc('set_config_decision', { p_request_id: requestId, p_control_id: controlId, p_decision: decision, p_note: note });
+  if (error) throw error;
+}
+
+export interface ExceptionInput {
+  controlId: string;
+  deviation: string;
+  justification: string;
+  compensating: string;
+  riskLevel: string;
+  expiresOn: string;
+}
+
+export async function requestException(supabase: SupabaseClient, requestId: string, input: ExceptionInput): Promise<void> {
+  const { error } = await supabase.rpc('request_exception', {
+    p_request_id: requestId,
+    p_control_id: input.controlId,
+    p_deviation: input.deviation,
+    p_justification: input.justification,
+    p_compensating: input.compensating,
+    p_risk_level: input.riskLevel,
+    p_expires_on: input.expiresOn,
+  });
+  if (error) throw error;
+}
+
+export async function decideException(supabase: SupabaseClient, id: string, approve: boolean, comment: string | null): Promise<void> {
+  const { error } = await supabase.rpc('decide_exception', { p_exception_id: id, p_approve: approve, p_comment: comment });
+  if (error) throw error;
+}
+
+export async function revokeException(supabase: SupabaseClient, id: string, comment: string | null): Promise<void> {
+  const { error } = await supabase.rpc('revoke_exception', { p_exception_id: id, p_comment: comment });
+  if (error) throw error;
+}
+
+export async function confirmConfiguration(supabase: SupabaseClient, requestId: string, controlId: string, configured: boolean): Promise<void> {
+  const { error } = await supabase.rpc('confirm_configuration', { p_request_id: requestId, p_control_id: controlId, p_configured: configured });
+  if (error) throw error;
+}
+
+export async function loadSecurityBaseline(supabase: SupabaseClient, orgId: string): Promise<unknown> {
+  const { data, error } = await supabase.from('security_baselines').select('controls').eq('org_id', orgId).maybeSingle<{ controls: unknown }>();
+  if (error) throw error;
+  return data ? { controls: data.controls } : null;
+}
+
+export async function saveSecurityBaseline(supabase: SupabaseClient, baseline: SecurityBaseline): Promise<void> {
+  const res = await callApi(supabase, '/v1/security-baseline', 'PUT', 30_000, baseline);
+  if (!res.ok) throw await apiError(res, 'The security baseline could not be saved.');
+}
+
+export async function resetSecurityBaseline(supabase: SupabaseClient): Promise<void> {
+  const res = await callApi(supabase, '/v1/security-baseline', 'DELETE');
+  if (!res.ok) throw await apiError(res, 'The security baseline could not be reset.');
 }
