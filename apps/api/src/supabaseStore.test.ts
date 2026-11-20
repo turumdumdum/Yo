@@ -39,7 +39,7 @@ describe('supabaseRequestStore', () => {
       ID,
       { serviceName: 'A' },
       { tier: 'Low', score: 0, reasons: [] },
-      [{ name: 'License check', status: 'In review', slaBusinessDays: 5, slaDueAt: '2026-11-20T15:30:00.000Z', note: null, checklist: ['Terms ok'], reviewFields: [], reviewRules: [] }],
+      [{ name: 'License check', status: 'In review', slaBusinessDays: 5, slaDueAt: '2026-11-20T15:30:00.000Z', note: null, checklist: ['Terms ok'], reviewFields: [], reviewRules: [], external: false }],
       { confidential: true, businessOwnerEmail: 'bo@acme.example' },
     );
     // Controls and visibility first, so the request is never visible without them.
@@ -56,7 +56,7 @@ describe('supabaseRequestStore', () => {
       p_risk_score: 0,
       p_risk_reasons: [],
       p_stages: [
-        { name: 'License check', status: 'In review', note: null, sla_business_days: 5, sla_due_at: '2026-11-20T15:30:00.000Z', checklist: ['Terms ok'], review_fields: [], review_rules: [] },
+        { name: 'License check', status: 'In review', note: null, sla_business_days: 5, sla_due_at: '2026-11-20T15:30:00.000Z', checklist: ['Terms ok'], review_fields: [], review_rules: [], external: false },
       ],
     });
   });

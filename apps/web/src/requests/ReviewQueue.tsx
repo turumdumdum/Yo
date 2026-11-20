@@ -51,8 +51,11 @@ export function ReviewQueue({ supabase, context, onOpen }: Props) {
 
   // Assigned to me; managers also get stages nobody is assigned to. Never my own requests,
   // unless the organization allows reviewing them.
+  // External stages are reviewed in another service: nothing to do here.
+  const externalCount = items.filter((i) => i.external).length;
   const mine = items.filter(
     (item) =>
+      !item.external &&
       (item.reviewer_id === context.userId || (context.isManager && item.reviewer_id === null)) &&
       (context.allowSelfReview || item.requests.requester_id !== context.userId),
   );
@@ -64,6 +67,11 @@ export function ReviewQueue({ supabase, context, onOpen }: Props) {
   return (
     <section className="card review-queue" aria-labelledby="queue-heading">
       <h2 id="queue-heading">To review</h2>
+      {externalCount > 0 && (
+        <p className="field-hint">
+          {externalCount} {externalCount === 1 ? 'review runs' : 'reviews run'} in an external service and {externalCount === 1 ? 'is' : 'are'} not listed here.
+        </p>
+      )}
       {mine.length === 0 ? (
         <div className="empty-state">
           <p>Nothing is waiting for your review. New reviews appear here when a request is submitted.</p>

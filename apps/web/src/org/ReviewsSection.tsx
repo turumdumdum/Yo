@@ -1,6 +1,7 @@
 import {
   allFields,
   DEFAULT_REQUEST_FORM,
+  DEFAULT_REVIEW_GUIDES,
   DEFAULT_STAGES,
   defaultWorkflowSettings,
   describeRequirement,
@@ -146,6 +147,23 @@ function StageSettingsEditor({
         </fieldset>
       )}
 
+      <fieldset className="field">
+        <legend>Where does this review happen?</legend>
+        <div className="choices">
+          <label className="choice">
+            <input type="radio" name={`${id}-where`} checked={s.handledBy === 'here'} onChange={() => setS({ ...s, handledBy: 'here' })} />
+            Here: reviewers use the checklist and review form in this app
+          </label>
+          <label className="choice">
+            <input type="radio" name={`${id}-where`} checked={s.handledBy === 'external'} onChange={() => setS({ ...s, handledBy: 'external' })} />
+            In an external service: this app sends the request data and shows the status it reports back
+          </label>
+        </div>
+        {s.handledBy === 'external' && (
+          <p className="field-hint">Needs the external review service in Admin → Integrations. The checklist and review form below are not used then.</p>
+        )}
+      </fieldset>
+
       <div className="editor-row">
         <div className="field">
           <label htmlFor={`${id}-sla`}>Time to review (business days)</label>
@@ -162,6 +180,20 @@ function StageSettingsEditor({
       <div className="field">
         <label htmlFor={`${id}-check`}>Checklist: what the reviewer confirms, one item per line</label>
         <textarea id={`${id}-check`} rows={Math.min(10, Math.max(3, checklistText.split('\n').length + 1))} value={checklistText} onChange={(e) => setChecklistText(e.target.value)} />
+      </div>
+
+      <div className="field">
+        <label htmlFor={`${id}-guide`}>Guide for reviewers</label>
+        <textarea id={`${id}-guide`} rows={10} maxLength={STAGE_LIMITS.guide} value={s.guide} onChange={(e) => setS({ ...s, guide: e.target.value })} />
+        <p className="field-hint">
+          Shown in the Guide tab of this review. Start a line with “## ” for a heading and “- ” for a list item; https links
+          become clickable.{' '}
+          {DEFAULT_REVIEW_GUIDES[stage] && s.guide !== DEFAULT_REVIEW_GUIDES[stage] && (
+            <button type="button" className="link-button" onClick={() => setS({ ...s, guide: DEFAULT_REVIEW_GUIDES[stage]! })}>
+              Use the standard guide
+            </button>
+          )}
+        </p>
       </div>
 
       <FormError message={error} />
@@ -239,8 +271,15 @@ export function ReviewsSection({ supabase, orgId }: { supabase: SupabaseClient; 
               <li key={stage} className={`review-card${s.requirement === 'never' ? ' is-off' : ''}`}>
                 <div className="review-card-head">
                   <h3>{stage}</h3>
-                  <span className="status-badge" data-tone={TONE[s.requirement]}>
-                    {SHORT[s.requirement]}
+                  <span className="badges">
+                    {s.handledBy === 'external' && s.requirement !== 'never' && (
+                      <span className="status-badge" data-tone="waiting">
+                        External service
+                      </span>
+                    )}
+                    <span className="status-badge" data-tone={TONE[s.requirement]}>
+                      {SHORT[s.requirement]}
+                    </span>
                   </span>
                 </div>
                 <p className="review-card-summary">{describeRequirement(s, labelOf)}.</p>

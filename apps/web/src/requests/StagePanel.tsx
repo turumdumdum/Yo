@@ -7,6 +7,7 @@ import type { Member } from '../org/api';
 import { AnswerSummary } from './AnswerSummary';
 import { assignReviewer, decideStage, saveReviewAnswers, setChecklistItem, type InfoRequest, type StageRow } from './api';
 import { AskForm, QuestionThread } from './Questions';
+import { Guide } from './Guide';
 import { ReviewForm } from './ReviewForm';
 
 export interface ReviewContext {
@@ -15,6 +16,10 @@ export interface ReviewContext {
   isManager: boolean;
   allowSelfReview: boolean;
   members: Member[];
+  /** Review guides by stage name, written by the organization. */
+  guides?: Record<string, string>;
+  /** Display name of the external review service, when one is connected. */
+  externalServiceName?: string;
 }
 
 interface Props {
@@ -40,7 +45,7 @@ interface Props {
   onChanged: () => Promise<void> | void;
 }
 
-export type StageTab = 'request' | 'form' | 'checklist' | 'controls' | 'questions' | 'decision';
+export type StageTab = 'guide' | 'request' | 'form' | 'checklist' | 'controls' | 'questions' | 'decision';
 type Tab = StageTab;
 
 const OPEN = new Set(['In review', 'Waiting for requester']);
@@ -115,7 +120,8 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
   }, [review]);
 
   const open = OPEN.has(stage.status);
-  const mayReview = context.isManager || stage.reviewer_id === context.userId;
+  const external = stage.external === true;
+  const mayReview = !external && (context.isManager || stage.reviewer_id === context.userId);
   const ownRequest = requesterId === context.userId && !context.allowSelfReview;
   const canAct = open && mayReview && !ownRequest;
   const nameOf = (userId: string | null) => (userId ? (context.members.find((m) => m.user_id === userId)?.email ?? 'a former member') : null);
@@ -144,7 +150,9 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
     Rejected: [],
   };
 
-  const tabs: { id: Tab; label: string; badge?: string; done?: boolean }[] = [
+  const guide = context.guides?.[stage.name]?.trim() ?? '';
+  const tabs: { id: Tab; label: string; badge?: string; done?: boolean }[] = external ? [] : [
+    ...(guide && (canAct || mayReview) ? [{ id: 'guide' as const, label: 'Guide' }] : []),
     ...(focus.length > 0 ? [{ id: 'request' as const, label: 'Request' }] : []),
     ...(hasForm
       ? [{ id: 'form' as const, label: 'Review form', badge: requiredCount > 0 ? `${requiredCount - missingCount}/${requiredCount}` : undefined, done: formComplete }]
@@ -215,6 +223,45 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
     ...(openQuestions > 0 ? [{ ok: false, note: true, text: `${openQuestions} ${openQuestions === 1 ? 'question waits' : 'questions wait'} for the requester’s answer`, tab: 'questions' as const }] : []),
   ];
 
+  if (external) {
+    const service = context.externalServiceName || 'an external service';
+    return (
+      <div className="stage-panel external-stage">
+        <p>
+          <strong>Reviewed in {service}.</strong> The status here comes from that service: it changes when the reviewers there
+          update it, and nobody can change it in this app.
+        </p>
+        <p className="stage-meta">
+          Status: {stage.status}
+          {stage.external_id ? ` · reference ${stage.external_id}` : ''}
+          {open && stage.sla_due_at ? ` · ${dueText(stage.sla_due_at).text}` : ''}
+        </p>
+        {stage.external_url && (
+          <a className="button button-secondary button-small" href={stage.external_url} target="_blank" rel="noopener noreferrer">
+            Open in {service}
+          </a>
+        )}
+        {stage.decided_at && (
+          <div className="decision">
+            <p>
+              <strong>{stage.status}</strong> in {service} on {formatDateTime(stage.decided_at)}.
+            </p>
+            {stage.conditions && (
+              <p>
+                <strong>Conditions:</strong> {stage.conditions}
+              </p>
+            )}
+            {stage.decision_comment && (
+              <p>
+                <strong>Comment:</strong> {stage.decision_comment}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="stage-panel">
       <div className="stage-panel-head">
@@ -268,6 +315,8 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
       )}
 
       <div id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-tab-${current}`} className="stage-tab-panel">
+        {current === 'guide' && <Guide text={guide} />}
+
         {current === 'request' && (
           <>
             <p className="field-hint">The answers that matter most for the {stage.name.toLowerCase()}. All answers are under “Request details” further down.</p>

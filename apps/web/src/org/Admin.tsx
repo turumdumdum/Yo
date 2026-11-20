@@ -21,6 +21,7 @@ import { InviteSection } from './InviteSection';
 import { RequestFormsSection } from './RequestFormEditor';
 import { ReviewsSection } from './ReviewsSection';
 import { AiSettingsSection } from './AiSettingsSection';
+import { IntegrationsSection } from './IntegrationsSection';
 import { ExceptionsSection } from './ExceptionsSection';
 import { SecurityBaselineSection } from './SecurityBaselineSection';
 
@@ -33,7 +34,7 @@ interface Props {
   onChanged: () => Promise<void> | void;
 }
 
-type AdminSection = 'people' | 'domains' | 'request-form' | 'review-forms' | 'baseline' | 'exceptions' | 'ai' | 'settings';
+type AdminSection = 'people' | 'domains' | 'request-form' | 'review-forms' | 'baseline' | 'exceptions' | 'ai' | 'integrations' | 'settings';
 
 const SECTIONS: { id: AdminSection; label: string; hint: string }[] = [
   { id: 'people', label: 'People', hint: 'Members, roles and invitations' },
@@ -43,6 +44,7 @@ const SECTIONS: { id: AdminSection; label: string; hint: string }[] = [
   { id: 'baseline', label: 'Security baseline', hint: 'Configuration every service must have' },
   { id: 'exceptions', label: 'Exceptions', hint: 'Accepted risks and their end dates' },
   { id: 'ai', label: 'AI check', hint: 'Instructions and questions for the AI' },
+  { id: 'integrations', label: 'Integrations', hint: 'Slack, UpGuard, external review' },
   { id: 'settings', label: 'Settings', hint: 'Review rules' },
 ];
 
@@ -265,6 +267,8 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
         {section === 'exceptions' && <ExceptionsSection supabase={supabase} orgId={organization.id} userId={userId} members={members} />}
 
         {section === 'ai' && <AiSettingsSection supabase={supabase} orgId={organization.id} />}
+
+        {section === 'integrations' && <IntegrationsSection supabase={supabase} />}
 
         {section === 'settings' && (
           <section className="card" aria-labelledby="settings-heading">

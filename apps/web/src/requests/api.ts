@@ -89,10 +89,14 @@ export interface StageRow {
   decided_at: string | null;
   review_fields: ReviewFieldDef[];
   review_rules: ReviewRule[];
+  /** Reviewed in an external service; only that service changes the status. */
+  external?: boolean;
+  external_id?: string | null;
+  external_url?: string | null;
 }
 
 const STAGE_COLUMNS =
-  'id,request_id,position,name,status,note,reviewer_id,sla_due_at,sla_paused,checklist,decision_comment,conditions,decided_by,decided_at,review_fields,review_rules';
+  'id,request_id,position,name,status,note,reviewer_id,sla_due_at,sla_paused,checklist,decision_comment,conditions,decided_by,decided_at,review_fields,review_rules,external,external_id,external_url';
 
 /** Review answers by stage id. Empty for people who may not see them, such as the requester. */
 export async function requestReviewAnswers(supabase: SupabaseClient, requestId: string): Promise<Record<string, Answers>> {
@@ -179,13 +183,14 @@ export interface QueueItem {
   reviewer_id: string | null;
   sla_due_at: string | null;
   requests: { service_name: string | null; requester_id: string; risk_tier: string | null };
+  external?: boolean;
 }
 
 /** Open stages of requests the caller can see, most urgent first. */
 export async function listOpenStages(supabase: SupabaseClient): Promise<QueueItem[]> {
   const { data, error } = await supabase
     .from('request_stages')
-    .select('id,request_id,name,status,reviewer_id,sla_due_at,requests(service_name,requester_id,risk_tier)')
+    .select('id,request_id,name,status,reviewer_id,sla_due_at,external,requests(service_name,requester_id,risk_tier)')
     .in('status', ['In review', 'Waiting for requester'])
     .order('sla_due_at');
   if (error) throw error;
@@ -607,4 +612,79 @@ export async function saveSecurityBaseline(supabase: SupabaseClient, baseline: S
 export async function resetSecurityBaseline(supabase: SupabaseClient): Promise<void> {
   const res = await callApi(supabase, '/v1/security-baseline', 'DELETE');
   if (!res.ok) throw await apiError(res, 'The security baseline could not be reset.');
+}
+
+// ---------------------------------------------------------------------------
+// Integrations (secrets are write-only: the API never returns them)
+// ---------------------------------------------------------------------------
+
+export const SLACK_EVENTS = [
+  { key: 'request.submitted', label: 'A request is submitted' },
+  { key: 'request.approved', label: 'A request is approved' },
+  { key: 'request.rejected', label: 'A request is rejected' },
+  { key: 'stage.decided', label: 'A review stage is decided' },
+  { key: 'exception.requested', label: 'An exception waits for an org admin' },
+  { key: 'info_request.asked', label: 'A reviewer asks the requester a question' },
+] as const;
+
+export interface IntegrationsStatus {
+  encryptionReady: boolean;
+  slack: { enabled: boolean; configured: boolean; events: string[] };
+  upguard: { enabled: boolean; configured: boolean };
+  external: { enabled: boolean; name: string; outboundUrl: string; configured: boolean; sendAllAnswers: boolean };
+}
+
+export async function loadIntegrations(supabase: SupabaseClient): Promise<IntegrationsStatus> {
+  const res = await callApi(supabase, '/v1/integrations', 'GET');
+  if (!res.ok) throw await apiError(res, 'The integrations could not be loaded.');
+  return (await res.json()) as IntegrationsStatus;
+}
+
+export async function saveSlack(supabase: SupabaseClient, body: { enabled: boolean; events: string[]; webhookUrl?: string }): Promise<void> {
+  const res = await callApi(supabase, '/v1/integrations/slack', 'PUT', 30_000, body);
+  if (!res.ok) throw await apiError(res, 'The Slack settings could not be saved.');
+}
+
+export async function testSlack(supabase: SupabaseClient): Promise<void> {
+  const res = await callApi(supabase, '/v1/integrations/slack/test', 'POST', 30_000, {});
+  if (!res.ok) throw await apiError(res, 'The test message could not be sent.');
+}
+
+export async function saveUpguard(supabase: SupabaseClient, body: { enabled: boolean; apiKey?: string }): Promise<void> {
+  const res = await callApi(supabase, '/v1/integrations/upguard', 'PUT', 30_000, body);
+  if (!res.ok) throw await apiError(res, 'The UpGuard settings could not be saved.');
+}
+
+export async function saveExternal(
+  supabase: SupabaseClient,
+  body: { enabled: boolean; name: string; outboundUrl: string; sendAllAnswers: boolean; rotateSecret?: boolean },
+): Promise<{ secret?: string }> {
+  const res = await callApi(supabase, '/v1/integrations/external', 'PUT', 30_000, body);
+  if (!res.ok) throw await apiError(res, 'The external review settings could not be saved.');
+  return (await res.json().catch(() => ({}))) as { secret?: string };
+}
+
+export interface VendorRiskCheck {
+  id: string;
+  source: string;
+  hostname: string;
+  data: { name?: string | null; hostname?: string | null; score?: number | null; categories?: { name: string; score: number | null }[]; url?: string | null };
+  fetched_at: string;
+}
+
+export async function listVendorRiskChecks(supabase: SupabaseClient, requestId: string): Promise<VendorRiskCheck[]> {
+  const { data, error } = await supabase
+    .from('vendor_risk_checks')
+    .select('id,source,hostname,data,fetched_at')
+    .eq('request_id', requestId)
+    .order('fetched_at', { ascending: false })
+    .limit(5);
+  if (error) throw error;
+  return data as VendorRiskCheck[];
+}
+
+export async function checkUpguard(supabase: SupabaseClient, requestId: string): Promise<VendorRiskCheck> {
+  const res = await callApi(supabase, `/v1/requests/${requestId}/vendor-risk/upguard`, 'POST', 60_000, {});
+  if (!res.ok) throw await apiError(res, 'UpGuard could not be reached.');
+  return ((await res.json()) as { check: VendorRiskCheck }).check;
 }

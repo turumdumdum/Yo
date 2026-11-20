@@ -116,7 +116,10 @@ async function securityBaseline(store: RequestStore, orgId: string): Promise<Sec
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function requestRoutes(store: RequestStore) {
+/** Called after a request was submitted, without waiting (for example to queue external reviews). */
+export type AfterSubmit = (requestId: string, orgId: string) => Promise<void> | void;
+
+export function requestRoutes(store: RequestStore, afterSubmit?: AfterSubmit) {
   const routes = new Hono();
 
   routes.post('/:id/submit', async (c) => {
@@ -150,6 +153,12 @@ export function requestRoutes(store: RequestStore) {
       const visibility = { confidential: isConfidential(cleaned, form), businessOwnerEmail: businessOwnerEmail(cleaned, form) };
       const controls = configRequirementsFor(await securityBaseline(store, request.org_id), risk.tier, cleaned);
       const submitted = await store.submit(id, cleaned, risk, stages, visibility, controls);
+      if (afterSubmit) {
+        // Never delays or fails the submission: the outbox retries what fails.
+        void Promise.resolve()
+          .then(() => afterSubmit(id, request.org_id))
+          .catch((error: unknown) => console.error('After-submit hook failed:', error instanceof Error ? error.message : error));
+      }
       return c.json({
         id: submitted.id,
         status: submitted.status,

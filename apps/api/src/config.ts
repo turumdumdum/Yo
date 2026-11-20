@@ -4,6 +4,9 @@ import type { AppOptions } from './app';
 import { logMailer, resendMailer, type Mailer } from './email';
 import { supabaseAttachmentStore } from './supabaseAttachments';
 import { supabaseRequestStore } from './supabaseStore';
+import { importEncryptionKey } from './crypto';
+import { queueExternalStages, runOutbox, type DispatcherDeps } from './dispatcher';
+import { supabaseIntegrationStore } from './integrationStore';
 
 type Env = Record<string, string | undefined>;
 
@@ -11,7 +14,7 @@ type Env = Record<string, string | undefined>;
  * Builds the app options from environment values (process.env on Node, bindings on Workers).
  * Fails at start-up rather than on the first request when something is missing.
  */
-export function optionsFromEnv(env: Env): AppOptions {
+export function optionsFromEnv(env: Env): AppOptions & { outbox: DispatcherDeps } {
   const required = (name: string): string => {
     const value = env[name];
     if (!value) throw new Error(`Missing environment variable ${name}. Set it in apps/api/.env (see apps/api/.env.example).`);
@@ -48,9 +51,28 @@ export function optionsFromEnv(env: Env): AppOptions {
   };
   const store = supabaseRequestStore(supabase);
 
+  const webOrigin = required('WEB_ORIGIN');
+  const integrationStore = supabaseIntegrationStore(supabase);
+  // Without the key, integrations that keep secrets are unavailable (the API says so).
+  const key = env.INTEGRATION_ENCRYPTION_KEY ? importEncryptionKey(env.INTEGRATION_ENCRYPTION_KEY) : Promise.resolve(null);
+  key.catch(() => undefined);
+  const publicApiUrl = env.PUBLIC_API_URL || undefined;
+  const outbox: DispatcherDeps = { store: integrationStore, key, webOrigin, publicApiUrl, log: (l) => console.info(l) };
+
   return {
     ai,
-    webOrigin: required('WEB_ORIGIN'),
+    webOrigin,
+    outbox,
+    integrations: {
+      store: integrationStore,
+      key,
+      publicApiUrl,
+      upguardBaseUrl: env.UPGUARD_BASE_URL || 'https://cyber-risk.upguard.com/api/public',
+    },
+    afterSubmit: async (requestId, orgId) => {
+      await queueExternalStages(outbox, requestId);
+      await runOutbox(outbox, orgId);
+    },
     requests: store,
     admin: store,
     invitations: store,

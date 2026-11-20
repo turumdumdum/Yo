@@ -12,6 +12,7 @@ import { RequestProgress } from './RequestProgress';
 import { StageList } from './StageList';
 import type { ReviewContext } from './StagePanel';
 import { Visibility } from './Visibility';
+import { VendorRisk } from './VendorRisk';
 import { Lifecycle } from './Lifecycle';
 import { openControls, SecurityConfig } from './SecurityConfig';
 
@@ -134,6 +135,10 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
 
       {/* While the security review is open, the controls live in its Configuration tab. */}
       {request.status !== 'draft' && !securityOpen && <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} />}
+
+      {request.status !== 'draft' && (context.isManager || (stages ?? []).some((st) => st.reviewer_id === context.userId)) && (
+        <VendorRisk supabase={supabase} request={request} />
+      )}
 
       {request.status !== 'draft' && <Visibility supabase={supabase} request={request} context={context} onChanged={reload} />}
 

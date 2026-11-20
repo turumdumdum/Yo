@@ -2350,3 +2350,67 @@ details.review-section[open] {
 .queue-group.group-overdue h3 {
   color: #8c1d18;
 }
+
+/* Integrations, guides, vendor risk */
+.integration-cards {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+.integration-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.integration-card h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.review-guide h4 {
+  margin: 12px 0 4px;
+  font-size: 16px;
+}
+.review-guide h4:first-child {
+  margin-top: 0;
+}
+.review-guide ul {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+.review-guide p {
+  margin: 0 0 8px;
+  line-height: 1.6;
+}
+.external-stage {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--status-waiting-bg);
+}
+.external-stage p {
+  margin: 0 0 8px;
+}
+.risk-snapshot {
+  margin-bottom: 12px;
+}
+.risk-score {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 700;
+}
+.risk-categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px 16px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.risk-categories li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}

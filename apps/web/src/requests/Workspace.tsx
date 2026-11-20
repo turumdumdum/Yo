@@ -1,4 +1,4 @@
-import { ORG_ROLE_LABELS } from '@app/shared';
+import { defaultWorkflowSettings, ORG_ROLE_LABELS, parseWorkflowSettings } from '@app/shared';
 import { useCallback, useEffect, useState } from 'react';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
@@ -21,6 +21,7 @@ import { RequestDetail } from './RequestDetail';
 import { RequestForm } from './RequestForm';
 import { ReviewQueue } from './ReviewQueue';
 import type { ReviewContext } from './StagePanel';
+import { loadWorkflowSettings } from './api';
 
 interface Props {
   supabase: SupabaseClient;
@@ -79,7 +80,23 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
     void reload();
   }, [reload]);
 
-  const context: ReviewContext = { userId: user.id, isManager, allowSelfReview: organization.allow_self_review, members };
+  // Review guides by stage, from the organization's review settings (or the standard ones).
+  const [guides, setGuides] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(defaultWorkflowSettings()).map(([k, v]) => [k, v.guide])));
+  useEffect(() => {
+    let cancelled = false;
+    loadWorkflowSettings(supabase, organization.id).then(
+      (stored) => {
+        if (cancelled || stored === null) return;
+        const parsed = parseWorkflowSettings(stored);
+        if ('settings' in parsed) setGuides(Object.fromEntries(Object.entries(parsed.settings).map(([k, v]) => [k, v.guide])));
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, organization.id]);
+  const context: ReviewContext = { userId: user.id, isManager, allowSelfReview: organization.allow_self_review, members, guides };
 
   async function openRequest(id: string, stageId?: string) {
     setBusy(true);

@@ -7,7 +7,9 @@ import { aiRoutes } from './ai/routes';
 import { attachmentRoutes, type AttachmentStore } from './attachments';
 import type { Mailer } from './email';
 import { invitationRoutes, type InvitationStore } from './invitations';
-import { requestRoutes, type RequestStore } from './requests';
+import { requestRoutes, type AfterSubmit, type RequestStore } from './requests';
+import { integrationRoutes, type IntegrationRouteOptions } from './integrations';
+import { bodyLimits, jsonOnly, noStore, rateLimit, type RateLimitRule } from './security';
 
 // Platform-neutral application. Only Web-standard APIs here: anything specific to
 // Cloudflare Workers or Node goes behind an adapter passed in by the entrypoint.
@@ -23,6 +25,11 @@ export interface AppOptions {
   invitations?: InvitationStore;
   /** Outgoing email; without it invitation links are handed back to share by hand. */
   mailer?: Mailer;
+  /** Integrations (Slack, UpGuard, external review service). */
+  integrations?: Omit<IntegrationRouteOptions, 'requests' | 'getCaller' | 'webOrigin'>;
+  afterSubmit?: AfterSubmit;
+  /** Override the rate limits (tests). */
+  rateLimits?: RateLimitRule[];
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -48,14 +55,23 @@ export function createApp(options: AppOptions = {}) {
     );
   }
 
+  app.use('/v1/*', noStore());
+  app.use('/v1/*', rateLimit(options.rateLimits));
+  app.use('/v1/*', bodyLimits());
+  app.use('/v1/*', jsonOnly());
+
   app.get('/health', (c) => c.json({ status: 'ok' }));
 
   if (options.requests) {
-    app.route('/v1/requests', requestRoutes(options.requests));
+    app.route('/v1/requests', requestRoutes(options.requests, options.afterSubmit));
     app.route('/v1', aiRoutes(options.requests, options.ai));
   }
   if (options.admin) app.route('/v1', adminRoutes(options.admin));
   if (options.attachments) app.route('/v1', attachmentRoutes(options.attachments));
+  if (options.integrations && options.requests && options.admin && options.webOrigin) {
+    const admin = options.admin;
+    app.route('/v1', integrationRoutes({ ...options.integrations, requests: options.requests, getCaller: (t) => admin.getCaller(t), webOrigin: options.webOrigin }));
+  }
   if (options.invitations && options.webOrigin) {
     app.route('/v1', invitationRoutes(options.invitations, { webOrigin: options.webOrigin, mailer: options.mailer }));
   }
