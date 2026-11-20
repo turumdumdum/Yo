@@ -7,7 +7,10 @@ import { asAnon, asUser, createUser, pool, resetDatabase } from './db';
 /** The organization column of a table, readable by every signed-in member. */
 const column = (table: string) => (table === 'organizations' ? 'id' : 'org_id');
 
-const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments', 'request_form_templates', 'request_viewers', 'workflow_settings', 'ai_settings', 'security_baselines', 'review_exceptions'];
+const TENANT_TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments', 'request_form_templates', 'request_viewers', 'workflow_settings', 'ai_settings', 'security_baselines', 'review_exceptions', 'vendor_risk_checks'];
+
+/** Tables only the backend (service role) reads or writes; browser roles have no privileges at all. */
+const SERVICE_ONLY_TABLES = ['integration_settings', 'outbound_events', 'inbound_events', 'notification_cursors'];
 
 let adminA: string; // org admin of org A
 let requesterA: string; // requester in org A
@@ -92,6 +95,10 @@ beforeAll(async () => {
     `insert into public.review_exceptions (org_id, request_id, control_id, control_title, deviation, justification, compensating_controls, risk_level, expires_on)
      select r.org_id, r.id, 'sso', 'SSO', 'd', 'j', 'c', 'Low', current_date + 30 from public.requests r`,
   );
+  await pool.query(
+    `insert into public.vendor_risk_checks (org_id, request_id, source, hostname, data)
+     select r.org_id, r.id, 'upguard', 'vendor.example', '{"score": 800}' from public.requests r`,
+  );
 });
 
 afterAll(async () => {
@@ -114,7 +121,23 @@ describe('schema guard', () => {
        join pg_namespace n on n.oid = c.relnamespace
        where n.nspname = 'public' and c.relkind in ('r', 'p') order by 1`,
     );
-    expect(rows.map((r) => r.relname)).toEqual([...TENANT_TABLES].sort());
+    expect(rows.map((r) => r.relname)).toEqual([...TENANT_TABLES, ...SERVICE_ONLY_TABLES].sort());
+  });
+
+  it('gives browser roles no read access to exactly the service-only tables', async () => {
+    const { rows } = await pool.query<{ relname: string }>(
+      `select c.relname from pg_class c
+       join pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = 'public' and c.relkind in ('r', 'p')
+         and not has_any_column_privilege('authenticated', c.oid, 'SELECT') order by 1`,
+    );
+    expect(rows.map((r) => r.relname)).toEqual([...SERVICE_ONLY_TABLES].sort());
+  });
+
+  it.each(SERVICE_ONLY_TABLES)('refuses %s to signed-in users and visitors', async (table) => {
+    await expect(asUser(adminA, (c) => c.query(`select 1 from public.${table}`))).rejects.toThrow(/permission denied/);
+    await expect(asAnon((c) => c.query(`select 1 from public.${table}`))).rejects.toThrow(/permission denied/);
+    await expect(asUser(adminA, (c) => c.query(`delete from public.${table}`))).rejects.toThrow(/permission denied/);
   });
 });
 

@@ -3,7 +3,7 @@ import { asSession, asUser, createUser, GOOGLE, PASSWORD_ONLY, PASSWORD_WITH_TOT
 
 // Mandatory MFA is enforced by RLS: email + password without TOTP gets nothing (CLAUDE.md §8).
 
-const TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments', 'request_form_templates', 'request_viewers', 'workflow_settings', 'ai_settings', 'security_baselines', 'review_exceptions'];
+const TABLES = ['organizations', 'memberships', 'invitations', 'verified_domains', 'audit_log', 'requests', 'request_stages', 'review_templates', 'info_requests', 'attachments', 'request_form_templates', 'request_viewers', 'workflow_settings', 'ai_settings', 'security_baselines', 'review_exceptions', 'vendor_risk_checks'];
 
 let admin: string;
 let newcomer: string;
@@ -48,6 +48,10 @@ beforeAll(async () => {
   await pool.query(
     `insert into public.review_exceptions (org_id, request_id, control_id, control_title, deviation, justification, compensating_controls, risk_level, expires_on)
      select r.org_id, r.id, 'sso', 'SSO', 'd', 'j', 'c', 'Low', current_date + 30 from public.requests r`,
+  );
+  await pool.query(
+    `insert into public.vendor_risk_checks (org_id, request_id, source, hostname, data)
+     select r.org_id, r.id, 'upguard', 'vendor.example', '{}' from public.requests r`,
   );
 });
 
