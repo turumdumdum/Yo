@@ -1,20 +1,18 @@
 import type { Answers, RequestFormDefinition } from '@app/shared';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { StatusBadge } from '../components/StatusBadge';
 import type { InfoRequest, StageRow } from './api';
-import { StagePanel, type ReviewContext } from './StagePanel';
+import { dueText, StagePanel, type ReviewContext, type StageTab } from './StagePanel';
 
 const DONE = new Set(['Approved', 'Approved with conditions', 'Rejected']);
 const OPEN = new Set(['In review', 'Waiting for requester']);
 
-const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { dateStyle: 'medium' });
-
 function slaText(stage: StageRow, now: number): string | null {
   if (!stage.sla_due_at || DONE.has(stage.status)) return null;
-  if (stage.sla_paused) return 'SLA paused while waiting for the requester';
-  const due = new Date(stage.sla_due_at);
-  return due.getTime() < now ? `Overdue since ${formatDate(stage.sla_due_at)}` : `Due ${formatDate(stage.sla_due_at)}`;
+  if (stage.sla_paused) return 'Clock paused while waiting for the requester';
+  const due = dueText(stage.sla_due_at, now).text;
+  return due.charAt(0).toUpperCase() + due.slice(1);
 }
 
 interface Props {
@@ -29,12 +27,17 @@ interface Props {
   context: ReviewContext;
   /** Stage to show expanded at first, for example when arriving from the review queue. */
   initialStageId?: string;
+  /** Configuration controls, shown inside the security review. */
+  securityControls?: ReactNode;
+  securityControlsOpen?: number;
   onChanged: () => Promise<void> | void;
 }
 
 /** Review stages of a submitted request, with progress, reviewer, SLA and the review itself. */
-export function StageList({ supabase, stages, answers, form, reviewAnswers, questions, requesterId, context, initialStageId, onChanged }: Props) {
+export function StageList({ supabase, stages, answers, form, reviewAnswers, questions, requesterId, context, initialStageId, securityControls, securityControlsOpen, onChanged }: Props) {
   const [expanded, setExpanded] = useState<string | null>(initialStageId ?? null);
+  // The open tab of each stage, kept here: the panel is rebuilt after every decision or question.
+  const [tabs, setTabs] = useState<Record<string, StageTab>>({});
 
   if (stages.length === 0) {
     return <p className="empty">This request was submitted before review stages existed, so it has none.</p>;
@@ -55,24 +58,31 @@ export function StageList({ supabase, stages, answers, form, reviewAnswers, ques
         {stages.map((stage) => {
           const notRequired = stage.status === 'Not required';
           const isOpen = expanded === stage.id;
-          const mine = OPEN.has(stage.status) && (context.isManager || stage.reviewer_id === context.userId);
+          const mine =
+            OPEN.has(stage.status) &&
+            (context.isManager || stage.reviewer_id === context.userId) &&
+            (requesterId !== context.userId || context.allowSelfReview);
+          const yourTurn = mine && (stage.reviewer_id === context.userId || stage.reviewer_id === null);
           const meta = notRequired
             ? stage.note
             : [stage.reviewer_id ? `Reviewer: ${nameOf(stage.reviewer_id)}` : DONE.has(stage.status) ? null : 'No reviewer yet', slaText(stage, now)]
                 .filter(Boolean)
                 .join(' · ');
           return (
-            <li key={stage.id} className="stage-item">
+            <li key={stage.id} className={`stage-item${yourTurn ? ' your-turn' : ''}${isOpen ? ' is-open' : ''}`}>
               <div className="stage-row">
                 <span className="stage-main">
-                  <span className="stage-name">{stage.name}</span>
+                  <span className="stage-name">
+                    {stage.name}
+                    {yourTurn && <span className="your-turn-tag">Your review</span>}
+                  </span>
                   <span className="stage-meta">{meta}</span>
                 </span>
                 <StatusBadge status={stage.status} />
                 {!notRequired && (
                   <button
                     type="button"
-                    className="button button-secondary button-small"
+                    className={`button button-small${mine && !isOpen ? '' : ' button-secondary'}`}
                     aria-expanded={isOpen}
                     aria-label={`${isOpen ? 'Close' : mine ? 'Review' : 'Details of'} ${stage.name}`}
                     onClick={() => setExpanded(isOpen ? null : stage.id)}
@@ -93,6 +103,10 @@ export function StageList({ supabase, stages, answers, form, reviewAnswers, ques
                   questions={questions.filter((q) => q.stage_id === stage.id)}
                   requesterId={requesterId}
                   context={context}
+                  initialTab={tabs[stage.id]}
+                  onTabChange={(t) => setTabs((cur) => ({ ...cur, [stage.id]: t }))}
+                  controls={stage.name === 'Security review' ? securityControls : undefined}
+                  controlsOpen={stage.name === 'Security review' ? securityControlsOpen : undefined}
                   onChanged={onChanged}
                 />
               )}

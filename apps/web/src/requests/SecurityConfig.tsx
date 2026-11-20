@@ -84,6 +84,13 @@ interface Props {
   stages: StageRow[] | null;
   context: ReviewContext;
   onChanged: () => Promise<void> | void;
+  /** Shown inside the security review's tab instead of as its own card. */
+  embedded?: boolean;
+}
+
+/** Required controls still without a decision; they block approving the security review. */
+export function openControls(request: RequestRow): number {
+  return (request.config_requirements ?? []).filter((i) => i.level === 'required' && !i.decision).length;
 }
 
 /**
@@ -91,7 +98,7 @@ interface Props {
  * each control and can ask for exceptions; after approval the required controls become
  * configuration tasks.
  */
-export function SecurityConfig({ supabase, request, stages, context, onChanged }: Props) {
+export function SecurityConfig({ supabase, request, stages, context, onChanged, embedded = false }: Props) {
   const items = request.config_requirements ?? [];
   const [exceptions, setExceptions] = useState<ReviewException[]>([]);
   const [open, setOpen] = useState<{ id: string; mode: 'na' | 'exception' } | null>(null);
@@ -236,8 +243,12 @@ export function SecurityConfig({ supabase, request, stages, context, onChanged }
   };
 
   return (
-    <section className="card security-config" aria-labelledby="security-config-heading">
-      <h2 id="security-config-heading">Security configuration</h2>
+    <section className={`security-config${embedded ? '' : ' card'}`} aria-labelledby="security-config-heading">
+      {embedded ? (
+        <h4 id="security-config-heading">Security configuration</h4>
+      ) : (
+        <h2 id="security-config-heading">Security configuration</h2>
+      )}
       <p>
         {approved
           ? `What must be configured in the service. ${configured} of ${tasks.length} confirmed.`

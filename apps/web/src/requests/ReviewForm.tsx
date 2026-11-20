@@ -14,6 +14,8 @@ interface Props {
 
 const RADIO_MAX_OPTIONS = 5;
 
+const isEmpty = (v: unknown) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+
 function display(field: ReviewFieldDef, value: unknown): string {
   if (value === undefined || value === null || value === '') return '—';
   if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : '—';
@@ -127,31 +129,47 @@ export function ReviewForm({ fields, rules, answers, requestAnswers, onChange, m
           </ul>
         </div>
       )}
-      {sections.map((section) => (
-        <section key={section.title} className="review-section" aria-label={section.title}>
-          <h4>{section.title}</h4>
-          {onChange ? (
-            section.fields.map((field) => (
-              <FieldControl
-                key={field.key}
-                field={field}
-                value={answers[field.key]}
-                missing={missing[field.key]}
-                onChange={(value) => onChange(field.key, value)}
-              />
-            ))
-          ) : (
-            <dl className="details">
-              {section.fields.map((field) => (
-                <div key={field.key} className="details-row">
-                  <dt>{field.label}</dt>
-                  <dd>{display(field, answers[field.key])}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </section>
-      ))}
+      {sections.map((section, index) => {
+        const answered = section.fields.filter((f) => !isEmpty(answers[f.key])).length;
+        const open = section.fields.filter((f) => missing[f.key]).length;
+        return (
+          <details
+            key={section.title}
+            className={`review-section${open > 0 ? ' has-missing' : answered === section.fields.length ? ' is-complete' : ''}`}
+            // Sections with required answers still missing open by themselves; so does the first one.
+            open={open > 0 || index === 0 || !onChange}
+          >
+            <summary>
+              <span className="review-section-title">{section.title}</span>
+              <span className="review-section-progress">
+                {answered === section.fields.length ? '✓ ' : ''}
+                {answered} of {section.fields.length} answered
+                {open > 0 ? ` · ${open} required ${open === 1 ? 'answer' : 'answers'} missing` : ''}
+              </span>
+            </summary>
+            {onChange ? (
+              section.fields.map((field) => (
+                <FieldControl
+                  key={field.key}
+                  field={field}
+                  value={answers[field.key]}
+                  missing={missing[field.key]}
+                  onChange={(value) => onChange(field.key, value)}
+                />
+              ))
+            ) : (
+              <dl className="details">
+                {section.fields.map((field) => (
+                  <div key={field.key} className="details-row">
+                    <dt>{field.label}</dt>
+                    <dd>{display(field, answers[field.key])}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </details>
+        );
+      })}
     </div>
   );
 }

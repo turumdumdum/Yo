@@ -2046,3 +2046,307 @@ li[data-state='current'] .progress-dot {
 .security-config .progress-track {
   margin: 8px 0 12px;
 }
+
+/* Review: stage panel with tabs */
+.stage-item.your-turn {
+  border-left: 4px solid var(--accent);
+  padding-left: 8px;
+}
+.your-turn-tag {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #ffffff;
+  vertical-align: middle;
+}
+.stage-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.stage-panel-head .field {
+  flex: 1 1 260px;
+  margin-bottom: 0;
+}
+.stage-panel-head select {
+  width: 100%;
+}
+.stage-due {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+.stage-due.overdue {
+  color: #8c1d18;
+}
+.stage-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 16px 0 0;
+  border-bottom: 1px solid var(--border);
+}
+.stage-tabs button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--touch-target);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  background: none;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.stage-tabs button[aria-selected='true'] {
+  color: var(--accent-dark);
+  border-bottom-color: var(--accent);
+}
+.stage-tabs button[data-done='true'] {
+  color: var(--status-approved-fg);
+}
+.stage-tabs button[aria-selected='true'][data-done='true'] {
+  color: var(--accent-dark);
+}
+.stage-tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.tab-badge {
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--status-idle-bg);
+  color: var(--status-idle-fg);
+}
+.stage-tab-panel {
+  padding: 16px 0 4px;
+}
+.stage-tab-panel h4 {
+  margin: 0 0 8px;
+}
+
+/* Review form sections */
+details.review-section {
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+details.review-section > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  min-height: var(--touch-target);
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+details.review-section > summary::-webkit-details-marker {
+  display: none;
+}
+details.review-section > summary::before {
+  content: '▸';
+  color: var(--ink-tertiary);
+  margin-right: 4px;
+}
+details.review-section[open] > summary::before {
+  content: '▾';
+}
+.review-section-title {
+  flex: 1 1 auto;
+  font-weight: 700;
+}
+.review-section-progress {
+  font-size: 13px;
+  color: var(--ink-tertiary);
+}
+details.review-section.has-missing > summary .review-section-progress {
+  color: #8c1d18;
+  font-weight: 600;
+}
+details.review-section.is-complete > summary .review-section-progress {
+  color: var(--status-approved-fg);
+}
+details.review-section > :not(summary) {
+  margin-left: 12px;
+  margin-right: 12px;
+}
+details.review-section[open] {
+  padding-bottom: 8px;
+}
+
+/* Checklist as cards */
+.checklist-cards {
+  gap: 8px;
+}
+.checklist-cards .choice {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.checklist-cards .choice:has(input:checked) {
+  background: var(--status-approved-bg);
+  border-color: transparent;
+}
+
+/* Decision */
+.readiness {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.readiness li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+.readiness li > span:first-child {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+}
+.readiness li > span:nth-child(2) {
+  flex: 1 1 auto;
+}
+.readiness li.ok {
+  background: var(--status-approved-bg);
+  color: var(--status-approved-fg);
+}
+.readiness li.ok > span:first-child {
+  background: var(--status-approved-fg);
+  color: #ffffff;
+}
+.readiness li.todo {
+  background: var(--status-waiting-bg);
+  color: var(--status-waiting-fg);
+}
+.readiness li.todo > span:first-child {
+  background: var(--status-waiting-fg);
+  color: #ffffff;
+}
+.readiness li.note {
+  background: var(--status-review-bg);
+  color: var(--status-review-fg);
+}
+.readiness li.note > span:first-child {
+  background: var(--status-review-fg);
+  color: #ffffff;
+}
+.decision-cards {
+  display: grid;
+  gap: 8px;
+}
+.decision-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 400 !important;
+}
+.decision-card input {
+  margin-top: 3px;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+.decision-card > span {
+  display: grid;
+  gap: 2px;
+}
+.decision-text {
+  font-size: 14px;
+  color: var(--ink-secondary);
+}
+.decision-card.selected {
+  border: 2px solid var(--accent);
+  background: var(--accent-tint);
+}
+.decision-card.selected[data-decision='Rejected'] {
+  border-color: #b3261e;
+  background: var(--status-rejected-bg);
+}
+.decision-card.blocked {
+  cursor: not-allowed;
+  background: var(--ground);
+}
+.decision-card.blocked .decision-text {
+  color: var(--status-waiting-fg);
+}
+.decide > .button {
+  margin-top: 8px;
+}
+
+/* Review queue */
+.queue-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 8px 0 16px;
+}
+.queue-stat {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--ink);
+  text-decoration: none;
+  background: var(--surface);
+}
+.queue-stat:hover {
+  border-color: var(--accent);
+}
+.queue-stat.alert {
+  border-color: #b3261e;
+  background: var(--status-rejected-bg);
+  color: var(--status-rejected-fg);
+}
+.queue-stat-count {
+  font-family: var(--font-heading);
+  font-size: 26px;
+  font-weight: 700;
+}
+.queue-stat-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+.queue-group {
+  margin-top: 20px;
+}
+.queue-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+.queue-group.group-overdue h3 {
+  color: #8c1d18;
+}

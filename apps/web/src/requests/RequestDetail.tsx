@@ -13,7 +13,7 @@ import { StageList } from './StageList';
 import type { ReviewContext } from './StagePanel';
 import { Visibility } from './Visibility';
 import { Lifecycle } from './Lifecycle';
-import { SecurityConfig } from './SecurityConfig';
+import { openControls, SecurityConfig } from './SecurityConfig';
 
 const formatDate = (iso: string) => new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -58,6 +58,8 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
 
   const requester = context.members.find((m) => m.user_id === request.requester_id)?.email;
   const open = questions.filter((q) => q.answered_at === null);
+  const securityStage = stages?.find((s) => s.name === 'Security review');
+  const securityOpen = !!securityStage && (securityStage.status === 'In review' || securityStage.status === 'Waiting for requester');
 
   return (
     <div className="request-form">
@@ -118,6 +120,10 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
               requesterId={request.requester_id}
               context={context}
               initialStageId={initialStageId}
+              securityControls={
+                securityOpen && (request.config_requirements ?? []).length > 0 ? <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} embedded /> : undefined
+              }
+              securityControlsOpen={openControls(request)}
               onChanged={reload}
             />
           ) : (
@@ -126,7 +132,8 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
         </section>
       )}
 
-      {request.status !== 'draft' && <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} />}
+      {/* While the security review is open, the controls live in its Configuration tab. */}
+      {request.status !== 'draft' && !securityOpen && <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} />}
 
       {request.status !== 'draft' && <Visibility supabase={supabase} request={request} context={context} onChanged={reload} />}
 
