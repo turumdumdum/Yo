@@ -13,7 +13,7 @@
   "dependencies": {
     "@app/shared": "workspace:*",
     "@hono/node-server": "^2.1.8",
-    "hono": "^4.13.18",
+    "hono": "^4.13.19",
     "nodemailer": "^7.0.13"
   },
   "devDependencies": {
