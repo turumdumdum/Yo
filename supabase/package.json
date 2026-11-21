@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.6",
     "@types/pg": "^8.11.10",
     "pg": "^8.23.1",
     "typescript": "^7.0.2",
