@@ -36,6 +36,8 @@ export interface Member {
   user_id: string;
   email: string | null;
   role: OrgRole;
+  /** Reviews this member works on; null means every review. */
+  review_scope: string[] | null;
 }
 
 export interface Invitation {
@@ -58,7 +60,7 @@ export async function loadMembership(supabase: SupabaseClient, userId: string): 
 }
 
 export async function listMembers(supabase: SupabaseClient, orgId: string): Promise<Member[]> {
-  const { data, error } = await supabase.from('memberships').select('user_id,email,role').eq('org_id', orgId).order('email');
+  const { data, error } = await supabase.from('memberships').select('user_id,email,role,review_scope').eq('org_id', orgId).order('email');
   if (error) throw error;
   return data as Member[];
 }
@@ -137,4 +139,22 @@ export async function setRestrictToDomains(supabase: SupabaseClient, orgId: stri
     .select('id');
   if (error) throw error;
   if (data.length === 0) throw new Error('The setting could not be changed.');
+}
+
+/** Limits the reviews a member works on; null or an empty list means every review. Org admins only. */
+export async function setMemberReviewScope(supabase: SupabaseClient, orgId: string, userId: string, stages: string[] | null): Promise<void> {
+  const { error } = await supabase.rpc('set_member_review_scope', { p_org_id: orgId, p_user_id: userId, p_stages: stages && stages.length > 0 ? stages : null });
+  if (error) throw error;
+}
+
+/** Ids of the requests another member can see, for the admin's read-only "view as" preview. */
+export async function previewVisibleRequests(supabase: SupabaseClient, userId: string): Promise<Set<string>> {
+  const { data, error } = await supabase.rpc('preview_visible_requests', { p_user_id: userId });
+  if (error) throw error;
+  return new Set(((data ?? []) as { request_id: string }[]).map((r) => r.request_id));
+}
+
+/** Whether a review stage is within a member's scope. */
+export function inReviewScope(scope: string[] | null | undefined, stageName: string): boolean {
+  return !scope || scope.length === 0 || scope.includes(stageName);
 }

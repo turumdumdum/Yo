@@ -775,3 +775,72 @@ export async function checkUpguard(supabase: SupabaseClient, requestId: string):
   if (!res.ok) throw await apiError(res, 'UpGuard could not be reached.');
   return ((await res.json()) as { check: VendorRiskCheck }).check;
 }
+
+// ---------------------------------------------------------------------------
+// Vendor catalog and metrics (read-only; RLS decides what each viewer sees)
+// ---------------------------------------------------------------------------
+
+export interface VendorRow {
+  id: string;
+  status: RequestStatus;
+  service_name: string | null;
+  risk_tier: string | null;
+  is_confidential: boolean;
+  archived_at: string | null;
+  submitted_at: string | null;
+  updated_at: string;
+  answers: Answers;
+  form: RequestFormDefinition | null;
+  request_stages: { status: StageStatus; decided_at: string | null }[];
+}
+
+/** Approved requests, as vendor records. Archived ones are included; the catalog filters them. */
+export async function listVendors(supabase: SupabaseClient): Promise<VendorRow[]> {
+  const { data, error } = await supabase
+    .from('requests')
+    .select('id,status,service_name,risk_tier,is_confidential,archived_at,submitted_at,updated_at,answers,form,request_stages(status,decided_at)')
+    .eq('status', 'approved')
+    .is('deleted_at', null)
+    .order('service_name');
+  if (error) throw error;
+  return data as unknown as VendorRow[];
+}
+
+export interface MetricsStage {
+  name: string;
+  status: StageStatus;
+  created_at: string;
+  decided_at: string | null;
+  sla_due_at: string | null;
+}
+
+export interface MetricsRequest {
+  id: string;
+  status: RequestStatus;
+  risk_tier: string | null;
+  submitted_at: string | null;
+  answers: Answers;
+  request_stages: MetricsStage[];
+}
+
+export interface MetricsException {
+  request_id: string;
+  status: ExceptionStatus;
+  expires_on: string;
+  created_at: string;
+}
+
+/** Submitted requests with their stages, and exceptions, for the metrics page. */
+export async function listMetricsData(supabase: SupabaseClient): Promise<{ requests: MetricsRequest[]; exceptions: MetricsException[] }> {
+  const [requests, exceptions] = await Promise.all([
+    supabase
+      .from('requests')
+      .select('id,status,risk_tier,submitted_at,answers,request_stages(name,status,created_at,decided_at,sla_due_at)')
+      .neq('status', 'draft')
+      .is('deleted_at', null),
+    supabase.from('review_exceptions').select('request_id,status,expires_on,created_at'),
+  ]);
+  if (requests.error) throw requests.error;
+  if (exceptions.error) throw exceptions.error;
+  return { requests: requests.data as unknown as MetricsRequest[], exceptions: exceptions.data as MetricsException[] };
+}

@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { StatusBadge } from '../components/StatusBadge';
 import type { InfoRequest, StageRow } from './api';
+import { inReviewScope } from '../org/api';
 import { dueText, StagePanel, type ReviewContext, type StageTab } from './StagePanel';
 
 const DONE = new Set(['Approved', 'Approved with conditions', 'Rejected']);
@@ -61,6 +62,8 @@ export function StageList({ supabase, stages, answers, form, reviewAnswers, ques
           const mine =
             OPEN.has(stage.status) &&
             (context.isManager || stage.reviewer_id === context.userId) &&
+            inReviewScope(context.reviewScope, stage.name) &&
+            !context.readOnly &&
             (requesterId !== context.userId || context.allowSelfReview);
           const yourTurn = mine && (stage.reviewer_id === context.userId || stage.reviewer_id === null);
           const meta = notRequired

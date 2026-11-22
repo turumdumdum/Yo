@@ -11,6 +11,7 @@ import {
   revokeInvitation,
   sendInvitations,
   setAllowSelfReview,
+  setMemberReviewScope,
   type Domain,
   type Invitation,
   type Member,
@@ -24,6 +25,7 @@ import { AiSettingsSection } from './AiSettingsSection';
 import { IntegrationsSection } from './IntegrationsSection';
 import { ExceptionsSection } from './ExceptionsSection';
 import { SecurityBaselineSection } from './SecurityBaselineSection';
+import { ReviewScopeEditor } from './ReviewScopeEditor';
 
 interface Props {
   supabase: SupabaseClient;
@@ -32,6 +34,10 @@ interface Props {
   members: Member[];
   /** Reload members and organization settings after a change. */
   onChanged: () => Promise<void> | void;
+  /** Preview mode ("View as"): every control is switched off. */
+  readOnly?: boolean;
+  /** Start a read-only preview of the workspace as this member. */
+  onViewAs?: (member: Member) => void;
 }
 
 type AdminSection = 'people' | 'domains' | 'request-form' | 'review-forms' | 'baseline' | 'exceptions' | 'ai' | 'integrations' | 'settings';
@@ -51,7 +57,7 @@ const SECTIONS: { id: AdminSection; label: string; hint: string }[] = [
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { dateStyle: 'medium' });
 
 /** Organization administration for org admins: members, invitations, domains and settings. */
-export function Admin({ supabase, organization, userId, members, onChanged }: Props) {
+export function Admin({ supabase, organization, userId, members, onChanged, readOnly, onViewAs }: Props) {
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -115,7 +121,7 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
           </button>
         ))}
       </nav>
-      <div className="admin-content">
+      <fieldset className="admin-content readonly-fieldset" disabled={!!readOnly}>
         <FormError message={error} />
         {notice && (
           <p className="notice notice-approved" role="status">
@@ -175,6 +181,29 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
                         </option>
                       ))}
                     </select>
+                    <ReviewScopeEditor
+                      key={(member.review_scope ?? []).join('|')}
+                      idPrefix={`scope-${member.user_id}`}
+                      email={member.email ?? member.user_id}
+                      scope={member.review_scope}
+                      disabled={busy}
+                      onSave={(stages) =>
+                        run(
+                          () => setMemberReviewScope(supabase, organization.id, member.user_id, stages),
+                          `Review access for ${member.email ?? 'the member'} saved.`,
+                        )
+                      }
+                    />
+                    {onViewAs && member.user_id !== userId && (
+                      <button
+                        type="button"
+                        className="button button-secondary button-small"
+                        aria-label={`View the workspace as ${member.email}`}
+                        onClick={() => onViewAs(member)}
+                      >
+                        View as
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="button button-secondary button-small"
@@ -288,7 +317,7 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
             </p>
           </section>
         )}
-      </div>
+      </fieldset>
     </div>
   );
 }

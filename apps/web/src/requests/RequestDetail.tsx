@@ -63,7 +63,7 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
   const securityOpen = !!securityStage && (securityStage.status === 'In review' || securityStage.status === 'Waiting for requester');
 
   return (
-    <div className="request-form">
+    <div className="request-detail">
       <div className="form-top">
         <button type="button" className="link-button" onClick={onClose}>
           ← Back
@@ -91,95 +91,116 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
           {requester ? ` by ${requester}` : ''}.
         </p>
       )}
-      {request.status !== 'draft' && (
-        <RequestProgress request={request} stages={stages} questions={questions} isRequester={request.requester_id === context.userId} />
-      )}
-      <FormError message={error} />
-      <Lifecycle supabase={supabase} request={request} context={context} onChanged={reload} onDeleted={onClose} />
+      <div className="detail-layout">
+        <div className="detail-main">
+          {request.status !== 'draft' && (
+            <RequestProgress request={request} stages={stages} questions={questions} isRequester={request.requester_id === context.userId} />
+          )}
+          <FormError message={error} />
+          <fieldset className="readonly-fieldset" disabled={!!context.readOnly}>
+            <Lifecycle supabase={supabase} request={request} context={context} onChanged={reload} onDeleted={onClose} />
+          </fieldset>
 
-      {request.requester_id === context.userId && open.length > 0 && (
-        <ActionRequired
-          supabase={supabase}
-          questions={open}
-          stageName={(stageId) => stages?.find((st) => st.id === stageId)?.name ?? 'Review'}
-          nameOf={(userId) => context.members.find((m) => m.user_id === userId)?.email ?? 'A reviewer'}
-          onAnswered={reload}
-        />
-      )}
+          {request.requester_id === context.userId && open.length > 0 && (
+            <fieldset className="readonly-fieldset" disabled={!!context.readOnly}>
+              <ActionRequired
+                supabase={supabase}
+                questions={open}
+                stageName={(stageId) => stages?.find((st) => st.id === stageId)?.name ?? 'Review'}
+                nameOf={(userId) => context.members.find((m) => m.user_id === userId)?.email ?? 'A reviewer'}
+                onAnswered={reload}
+              />
+            </fieldset>
+          )}
 
-      {request.status !== 'draft' && (
-        <section className="card" aria-labelledby="stages-heading">
-          <h2 id="stages-heading">Checks</h2>
-          {stages ? (
-            <StageList
+          {request.status !== 'draft' && (
+            <section className="card" aria-labelledby="stages-heading">
+              <h2 id="stages-heading">Checks</h2>
+              {stages ? (
+                <StageList
+                  supabase={supabase}
+                  stages={stages}
+                  answers={request.answers}
+                  form={request.form}
+                  reviewAnswers={reviewAnswers}
+                  questions={questions}
+                  requesterId={request.requester_id}
+                  context={context}
+                  initialStageId={initialStageId}
+                  securityControls={
+                    securityOpen && (request.config_requirements ?? []).length > 0 ? <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} embedded /> : undefined
+                  }
+                  securityControlsOpen={openControls(request)}
+                  onChanged={reload}
+                />
+              ) : (
+                <p role="status">Loading…</p>
+              )}
+            </section>
+          )}
+
+          {/* While the security review is open, the controls live in its Configuration tab. */}
+          {request.status !== 'draft' && !securityOpen && (
+            <fieldset className="readonly-fieldset" disabled={!!context.readOnly}>
+              <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} />
+            </fieldset>
+          )}
+        </div>
+
+        <aside className="detail-side" aria-label="About this request">
+          {request.risk_tier && (
+            <section className="card" aria-labelledby="triage-heading">
+              <h2 id="triage-heading">Triage</h2>
+              <p>
+                Risk tier <strong>{request.risk_tier}</strong> (score {request.risk_score}).
+              </p>
+              {request.risk_reasons && request.risk_reasons.length > 0 && (
+                <ul className="plain-list">
+                  {request.risk_reasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+
+          <section className="card" aria-labelledby="details-heading">
+            <h2 id="details-heading">Request details</h2>
+            <AnswerSummary form={request.form} answers={request.answers} />
+          </section>
+
+          {request.status !== 'draft' && (
+            <fieldset className="readonly-fieldset" disabled={!!context.readOnly}>
+              <Visibility supabase={supabase} request={request} context={context} onChanged={reload} />
+            </fieldset>
+          )}
+
+          <section className="card" aria-labelledby="attachments-heading">
+            <h2 id="attachments-heading">Attachments</h2>
+            <Attachments
               supabase={supabase}
-              stages={stages}
-              answers={request.answers}
-              form={request.form}
-              reviewAnswers={reviewAnswers}
-              questions={questions}
-              requesterId={request.requester_id}
-              context={context}
-              initialStageId={initialStageId}
-              securityControls={
-                securityOpen && (request.config_requirements ?? []).length > 0 ? <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} embedded /> : undefined
+              requestId={request.id}
+              userId={context.userId}
+              // While in review: the requester, managers and reviewers of this request.
+              canUpload={
+                !context.readOnly &&
+                (request.status === 'in_review' || request.status === 'submitted') &&
+                (request.requester_id === context.userId ||
+                  context.isManager ||
+                  (stages ?? []).some((st) => st.reviewer_id === context.userId))
               }
-              securityControlsOpen={openControls(request)}
-              onChanged={reload}
+              canRemoveOwn={false}
+              nameOf={(userId) => (userId === context.userId ? 'you' : (context.members.find((m) => m.user_id === userId)?.email ?? 'a former member'))}
             />
-          ) : (
-            <p role="status">Loading…</p>
+          </section>
+
+          {request.status !== 'draft' && (context.isManager || (stages ?? []).some((st) => st.reviewer_id === context.userId)) && (
+            <fieldset className="readonly-fieldset" disabled={!!context.readOnly}>
+              <VendorRisk supabase={supabase} request={request} />
+            </fieldset>
           )}
-        </section>
-      )}
-
-      {/* While the security review is open, the controls live in its Configuration tab. */}
-      {request.status !== 'draft' && !securityOpen && <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} />}
-
-      {request.status !== 'draft' && (context.isManager || (stages ?? []).some((st) => st.reviewer_id === context.userId)) && (
-        <VendorRisk supabase={supabase} request={request} />
-      )}
-
-      {request.status !== 'draft' && <Visibility supabase={supabase} request={request} context={context} onChanged={reload} />}
-
-      <section className="card" aria-labelledby="attachments-heading">
-        <h2 id="attachments-heading">Attachments</h2>
-        <Attachments
-          supabase={supabase}
-          requestId={request.id}
-          userId={context.userId}
-          // While in review: the requester, managers and reviewers of this request.
-          canUpload={
-            (request.status === 'in_review' || request.status === 'submitted') &&
-            (request.requester_id === context.userId ||
-              context.isManager ||
-              (stages ?? []).some((st) => st.reviewer_id === context.userId))
-          }
-          canRemoveOwn={false}
-          nameOf={(userId) => (userId === context.userId ? 'you' : (context.members.find((m) => m.user_id === userId)?.email ?? 'a former member'))}
-        />
-      </section>
-
-      {request.risk_tier && (
-        <section className="card" aria-labelledby="triage-heading">
-          <h2 id="triage-heading">Triage</h2>
-          <p>
-            Risk tier <strong>{request.risk_tier}</strong> (score {request.risk_score}).
-          </p>
-          {request.risk_reasons && request.risk_reasons.length > 0 && (
-            <ul className="plain-list">
-              {request.risk_reasons.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
-
-      <section className="card" aria-labelledby="details-heading">
-        <h2 id="details-heading">Request details</h2>
-        <AnswerSummary form={request.form} answers={request.answers} />
-      </section>
+        </aside>
+      </div>
     </div>
   );
 }

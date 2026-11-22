@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
-import type { Member } from '../org/api';
+import { inReviewScope, type Member } from '../org/api';
 import { AnswerSummary } from './AnswerSummary';
 import { assignReviewer, decideStage, saveReviewAnswers, setChecklistItem, type InfoRequest, type StageRow } from './api';
 import { AskForm, QuestionThread } from './Questions';
@@ -22,6 +22,12 @@ export interface ReviewContext {
   externalServiceName?: string;
   /** Names of the organization's review services by id. */
   reviewServices?: Record<string, string>;
+  /** Reviews the signed-in (or previewed) person works on; null or absent means all. */
+  reviewScope?: string[] | null;
+  /** An admin's "view as" preview: everything is shown, nothing can be changed. */
+  readOnly?: boolean;
+  /** In a preview: the requests the previewed member can see. Absent means no filter. */
+  visibleRequestIds?: Set<string> | null;
 }
 
 interface Props {
@@ -123,9 +129,10 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
 
   const open = OPEN.has(stage.status);
   const external = stage.external === true;
-  const mayReview = !external && (context.isManager || stage.reviewer_id === context.userId);
+  // Outside the person's review scope the stage is shown for information only.
+  const mayReview = !external && inReviewScope(context.reviewScope, stage.name) && (context.isManager || stage.reviewer_id === context.userId);
   const ownRequest = requesterId === context.userId && !context.allowSelfReview;
-  const canAct = open && mayReview && !ownRequest;
+  const canAct = open && mayReview && !ownRequest && !context.readOnly;
   const nameOf = (userId: string | null) => (userId ? (context.members.find((m) => m.user_id === userId)?.email ?? 'a former member') : null);
   const isChecked = (index: number) => ticking[index] ?? stage.checklist[index]!.checked;
   const checkedCount = stage.checklist.filter((_, i) => isChecked(i)).length;
@@ -267,13 +274,14 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
   return (
     <div className="stage-panel">
       <div className="stage-panel-head">
-        {open && context.isManager ? (
+        {open && context.isManager && !context.readOnly ? (
           <div className="field">
             <label htmlFor={`${id}-reviewer`}>Reviewer</label>
             <select id={`${id}-reviewer`} value={stage.reviewer_id ?? ''} disabled={busy} onChange={(e) => void run(() => assignReviewer(supabase, stage.id, e.target.value || null))}>
               <option value="">Not assigned (org admins and process managers can review)</option>
               {context.members
-                .filter((m) => REVIEWER_ROLES.has(m.role))
+                // Only people whose review scope includes this review.
+                .filter((m) => REVIEWER_ROLES.has(m.role) && inReviewScope(m.review_scope, stage.name))
                 .map((m) => (
                   <option key={m.user_id} value={m.user_id}>
                     {m.email ?? m.user_id}
@@ -291,7 +299,8 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
         )}
       </div>
 
-      {open && mayReview && ownRequest && <p className="notice">You cannot review your own request. An org admin can allow this in the Admin settings.</p>}
+      {context.readOnly && open && <p className="notice">Preview: actions are switched off.</p>}
+      {open && mayReview && ownRequest && !context.readOnly && <p className="notice">You cannot review your own request. An org admin can allow this in the Admin settings.</p>}
 
       {tabs.length > 0 && (
         <div className="stage-tabs" role="tablist" aria-label={`${stage.name} sections`}>
@@ -374,7 +383,12 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
           </fieldset>
         )}
 
-        {current === 'controls' && controls}
+        {current === 'controls' && (
+          // In a read-only preview the controls are shown, every button inside disabled.
+          <fieldset className="readonly-fieldset" disabled={!!context.readOnly}>
+            {controls}
+          </fieldset>
+        )}
 
         {current === 'questions' && (
           <div className="stage-questions">

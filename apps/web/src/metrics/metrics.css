@@ -1,0 +1,164 @@
+/* Metrics. Chart chrome follows the dataviz reference: recessive grid and axes,
+   text in ink tokens, colors only on marks. The app is light-only for now. */
+.metrics {
+  --chart-grid: #e1e0d9;
+  --chart-baseline: #c3c2b7;
+  --chart-muted: #6b6a64;
+}
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+}
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.kpi.alert {
+  border-color: #7a4a00;
+  background: #fdf0d5;
+}
+.kpi-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.kpi-value {
+  font-family: 'Space Grotesk', Inter, sans-serif;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.kpi-hint {
+  font-size: 12px;
+  color: #566070;
+}
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: 12px;
+}
+.chart-card {
+  margin: 0;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.chart-card.wide {
+  grid-column: 1 / -1;
+}
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.chart-head h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.chart-head .link-button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: #3d4654;
+}
+.chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.chart-plot {
+  position: relative;
+  width: 100%;
+}
+.chart-svg {
+  display: block;
+  overflow: visible;
+}
+.chart-gridline {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+}
+.chart-baseline {
+  stroke: var(--chart-baseline);
+  stroke-width: 1;
+}
+.chart-label {
+  font-size: 13px;
+  fill: #3d4654;
+}
+.chart-value {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  fill: var(--ink);
+}
+.chart-axis {
+  font-size: 11px;
+  fill: var(--chart-muted);
+  font-variant-numeric: tabular-nums;
+}
+.chart-tip {
+  position: absolute;
+  z-index: 2;
+  min-width: 140px;
+  max-width: 220px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(20, 24, 31, 0.12);
+  font-size: 13px;
+  color: var(--ink);
+  pointer-events: none;
+}
+.chart-tip-title {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.chart-table-wrap {
+  overflow-x: auto;
+}
+.chart-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.chart-table th,
+.chart-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.chart-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.metrics-footnote {
+  margin-top: 16px;
+}

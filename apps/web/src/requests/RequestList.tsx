@@ -6,7 +6,8 @@ const formatDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { 
 const DONE = new Set(['Approved', 'Approved with conditions', 'Rejected']);
 
 /** The four views of the start screen. */
-export type RequestView = 'mine' | 'review' | 'approved' | 'rejected' | 'archived' | 'trash';
+/** Work views. Approved vendors live in the vendor catalog (vendors/VendorCatalog.tsx). */
+export type RequestView = 'mine' | 'review' | 'rejected' | 'archived' | 'trash';
 
 interface Props {
   requests: RequestSummary[];
@@ -37,13 +38,6 @@ const VIEWS: { id: RequestView; label: string; icon: string; empty: string; matc
     matches: (r) => (r.status === 'in_review' || r.status === 'submitted') && active(r),
   },
   {
-    id: 'approved',
-    label: 'Approved vendors',
-    icon: '✓',
-    empty: 'No vendors have been approved yet.',
-    matches: (r) => r.status === 'approved' && active(r),
-  },
-  {
     id: 'rejected',
     label: 'Rejected',
     icon: '✕',
@@ -65,7 +59,7 @@ const VIEWS: { id: RequestView; label: string; icon: string; empty: string; matc
     matches: (r) => !!r.deleted_at,
   },
 ];
-const MAIN_VIEWS = VIEWS.slice(0, 4);
+const MAIN_VIEWS = VIEWS.slice(0, 3);
 
 function isUrgent(request: RequestSummary, userId: string, awaiting: ReadonlySet<string>): boolean {
   return awaiting.has(request.id) || (request.status === 'draft' && request.requester_id === userId);
@@ -108,7 +102,7 @@ export function RequestList({ requests, userId, awaitingMyAnswer, nameOf, busy, 
 
   return (
     <>
-      <div className="view-tiles" role="group" aria-label="Show">
+      <div className="view-tiles" role="group" aria-label="Show" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
         {MAIN_VIEWS.map((v) => (
           <button key={v.id} type="button" className="view-tile" data-view={v.id} aria-pressed={view === v.id} onClick={() => setView(v.id)}>
             <span className="view-icon" aria-hidden="true">
@@ -121,7 +115,7 @@ export function RequestList({ requests, userId, awaitingMyAnswer, nameOf, busy, 
       </div>
       {(counts.archived > 0 || counts.trash > 0 || view === 'archived' || view === 'trash') && (
         <div className="view-more" role="group" aria-label="More">
-          {VIEWS.slice(4)
+          {VIEWS.slice(3)
             .filter((v) => counts[v.id] > 0 || view === v.id)
             .map((v) => (
               <button key={v.id} type="button" className="button button-secondary button-small" aria-pressed={view === v.id} onClick={() => setView(v.id)}>

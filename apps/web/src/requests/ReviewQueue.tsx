@@ -5,6 +5,7 @@ import { RiskBadge } from '../components/Badge';
 import { FormError } from '../components/FormError';
 import { StatusBadge } from '../components/StatusBadge';
 import { errorMessage } from '../lib/errors';
+import { inReviewScope } from '../org/api';
 import { listOpenStages, type QueueItem } from './api';
 import { dueText, type ReviewContext } from './StagePanel';
 
@@ -56,6 +57,8 @@ export function ReviewQueue({ supabase, context, onOpen }: Props) {
   const mine = items.filter(
     (item) =>
       !item.external &&
+      (!context.visibleRequestIds || context.visibleRequestIds.has(item.request_id)) &&
+      inReviewScope(context.reviewScope, item.name) &&
       (item.reviewer_id === context.userId || (context.isManager && item.reviewer_id === null)) &&
       (context.allowSelfReview || item.requests.requester_id !== context.userId),
   );

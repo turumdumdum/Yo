@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useId, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
@@ -109,6 +109,8 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
   const [ai, setAi] = useState({ provider: 'off', processor: 'base', apiKey: '' });
   const [slack, setSlack] = useState({ enabled: false, events: [] as string[], webhookUrl: '' });
   const [upguard, setUpguard] = useState({ enabled: false, apiKey: '' });
+  // Integrations opened from "Add an integration" in this visit.
+  const [adding, setAdding] = useState<Set<string>>(() => new Set());
 
   const reload = useCallback(async () => {
     try {
@@ -145,30 +147,15 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
 
   const secret = (v: string) => (v.trim() ? v.trim() : undefined);
 
-  return (
-    <section className="card" aria-labelledby="integrations-heading">
-      <h2 id="integrations-heading">Integrations</h2>
-      <p className="field-hint">
-        Everything the server needs can be set here. Keys, passwords and webhook addresses are stored encrypted on the server and
-        are never shown again: to change one, choose Replace and type a new one. A value set here wins over the server’s .env file.
-      </p>
-      <FormError message={error} />
-      {notice && (
-        <p className="notice notice-approved" role="status">
-          {notice}
-        </p>
-      )}
-      {status && !status.encryptionReady && (
-        <p className="notice">
-          The server has no encryption key yet, so keys and passwords cannot be saved. Restart the API once: it creates the key in
-          apps/api/.env by itself (on Cloudflare Workers, set INTEGRATION_ENCRYPTION_KEY as a secret). Settings without secrets
-          still work.
-        </p>
-      )}
-      {!status ? (
-        <p role="status">Loading…</p>
-      ) : (
-        <div className="integration-cards">
+  // Integrations that are set up show in full; the others wait under "Add an integration".
+  const cards: { id: string; label: string; hint: string; active: boolean; node: ReactNode }[] = status
+    ? [
+      {
+        id: 'server',
+        label: 'Server address',
+        hint: 'Public address of the API, for review services',
+        active: (status.server?.source ?? 'none') !== 'none',
+        node: (
           <Card id="int-server" title="Server address" badge={<SourceBadge source={status.server?.source ?? 'none'} />}>
             <p className="field-hint">
               The public address of the API. Review services use it to send their results back and to read request data.
@@ -181,7 +168,14 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
               Save address
             </button>
           </Card>
-
+        ),
+      },
+      {
+        id: 'email',
+        label: 'Email',
+        hint: 'Send invitations by email',
+        active: (status.email?.provider ?? 'off') !== 'off',
+        node: (
           <Card id="int-email" title="Email" badge={<SourceBadge source={status.email?.source ?? 'none'} />}>
             <p className="field-hint">Invitations are sent by email. Without email, you get each invitation link to pass on yourself.</p>
             <div className="editor-row">
@@ -231,7 +225,14 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
               </button>
             </div>
           </Card>
-
+        ),
+      },
+      {
+        id: 'ai',
+        label: 'AI assistant',
+        hint: 'Vendor lookup and answer checks',
+        active: (status.ai?.provider ?? 'off') !== 'off',
+        node: (
           <Card id="int-ai" title="AI assistant" badge={<SourceBadge source={status.ai?.source ?? 'none'} />}>
             <p className="field-hint">Optional. Suggests vendor details and checks answers. The product works fully without it.</p>
             <div className="editor-row">
@@ -267,7 +268,14 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
               Save AI settings
             </button>
           </Card>
-
+        ),
+      },
+      {
+        id: 'slack',
+        label: 'Slack notifications',
+        hint: 'Post events to a channel',
+        active: status.slack.enabled || status.slack.configured,
+        node: (
           <Card id="int-slack" title="Slack notifications" badge={<SourceBadge source={status.slack.configured ? 'settings' : 'none'} />}>
             <p className="field-hint">
               Posts short messages to a Slack channel through an incoming webhook (Slack → Apps → Incoming Webhooks). Messages hold
@@ -308,7 +316,14 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
               </button>
             </div>
           </Card>
-
+        ),
+      },
+      {
+        id: 'upguard',
+        label: 'UpGuard vendor ratings',
+        hint: 'Vendor security ratings',
+        active: status.upguard.enabled || status.upguard.configured,
+        node: (
           <Card id="int-upguard" title="UpGuard vendor ratings" badge={<SourceBadge source={status.upguard.configured ? 'settings' : 'none'} />}>
             <p className="field-hint">Shows the vendor’s UpGuard security rating on the request page. Needs an UpGuard API key.</p>
             <label className="choice">
@@ -325,8 +340,71 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
               Save UpGuard
             </button>
           </Card>
-
+        ),
+      },
+      {
+        id: 'services',
+        label: 'Review services',
+        hint: 'Run a review in another service',
+        active: (status.reviewServices ?? []).length > 0,
+        node: (
           <ReviewServicesCard supabase={supabase} services={status.reviewServices ?? []} encryptionReady={status.encryptionReady} onChanged={reload} />
+        ),
+      },
+    ]
+    : [];
+  const shown = cards.filter((c) => c.active || adding.has(c.id));
+  const available = cards.filter((c) => !c.active && !adding.has(c.id));
+
+
+  return (
+    <section className="card" aria-labelledby="integrations-heading">
+      <h2 id="integrations-heading">Integrations</h2>
+      <p className="field-hint">
+        Everything the server needs can be set here. Keys, passwords and webhook addresses are stored encrypted on the server and
+        are never shown again: to change one, choose Replace and type a new one. A value set here wins over the server’s .env file.
+      </p>
+      <FormError message={error} />
+      {notice && (
+        <p className="notice notice-approved" role="status">
+          {notice}
+        </p>
+      )}
+      {status && !status.encryptionReady && (
+        <p className="notice">
+          The server has no encryption key yet, so keys and passwords cannot be saved. Restart the API once: it creates the key in
+          apps/api/.env by itself (on Cloudflare Workers, set INTEGRATION_ENCRYPTION_KEY as a secret). Settings without secrets
+          still work.
+        </p>
+      )}
+      {!status ? (
+        <p role="status">Loading…</p>
+      ) : (
+        <div className="integration-cards">
+          {shown.length === 0 && <p className="empty">No integration is set up yet. The product works without any.</p>}
+          {shown.map((c) => (
+            <Fragment key={c.id}>{c.node}</Fragment>
+          ))}
+          {available.length > 0 && (
+            <section className="integration-add" aria-labelledby="int-add-heading">
+              <h3 id="int-add-heading">Add an integration</h3>
+              <ul className="integration-add-list">
+                {available.map((c) => (
+                  <li key={c.id}>
+                    <button type="button" className="integration-add-item" onClick={() => setAdding((cur) => new Set(cur).add(c.id))}>
+                      <span className="integration-add-plus" aria-hidden="true">
+                        +
+                      </span>
+                      <span>
+                        <strong>{c.label}</strong>
+                        <span className="stage-meta">{c.hint}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
       )}
     </section>

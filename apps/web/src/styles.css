@@ -85,9 +85,9 @@ a {
 }
 
 .page {
-  max-width: 960px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 24px 16px 48px;
+  padding: 24px clamp(16px, 3vw, 40px) 48px;
 }
 .page > h1 {
   font-size: 28px;
@@ -368,12 +368,14 @@ a {
 }
 
 /* Request form */
-.request-form > h1 {
+.request-form > h1,
+.request-detail > h1 {
   font-size: 28px;
   margin-bottom: 8px;
   overflow-wrap: anywhere;
 }
-.request-form > .badges {
+.request-form > .badges,
+.request-detail > .badges {
   margin-bottom: 12px;
 }
 .form-top {
@@ -2461,4 +2463,216 @@ details.review-section[open] {
 }
 .table-scroll {
   overflow-x: auto;
+}
+
+/* ---------- Wide layout, preview and review scope ---------- */
+
+/* Text blocks keep a readable line length on wide screens. */
+.lead,
+.field-hint,
+.card > p,
+.empty-state p,
+.notice {
+  max-width: 75ch;
+}
+/* The request form is a reading flow: keep it narrower than the page. */
+.request-form {
+  max-width: 880px;
+  margin-inline: auto;
+}
+
+/* Sticky bar with the organization line and section tabs. */
+.workspace-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--ground);
+  margin: -8px 0 16px;
+  padding-top: 8px;
+}
+.workspace-bar .tabs {
+  margin-bottom: 0;
+}
+.org-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.view-as-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.view-as-form label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Consistent, visible focus for buttons, links and fields. */
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.tabs button:hover {
+  color: var(--ink);
+}
+
+/* Read-only preview banner. */
+.preview-banner {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  padding: 10px 16px;
+  border: 1px solid #f0d49b;
+  border-radius: var(--radius);
+  background: var(--status-waiting-bg);
+  color: var(--status-waiting-fg);
+}
+.workspace-bar .preview-banner {
+  position: static;
+  margin-bottom: 8px;
+}
+.readonly-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.readonly-fieldset + .readonly-fieldset,
+.readonly-fieldset + .card,
+.card + .readonly-fieldset {
+  margin-top: 16px;
+}
+.readonly-fieldset:disabled .button,
+.readonly-fieldset:disabled button:not(.link-button):not([role='tab']) {
+  cursor: not-allowed;
+}
+
+/* Request detail: main column and side column. */
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+  gap: 20px;
+  align-items: start;
+}
+.detail-main,
+.detail-side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.detail-main > *,
+.detail-side > * {
+  margin-top: 0 !important;
+  margin-bottom: 0;
+}
+.detail-main:empty,
+.detail-side:empty {
+  display: none;
+}
+@media (max-width: 1000px) {
+  .detail-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Admin sidebar a little wider now that the page is wide. */
+@media (min-width: 1100px) {
+  .admin-layout {
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: 24px;
+  }
+}
+.admin-nav {
+  top: 120px;
+}
+
+/* Integrations: set-up ones as cards, the rest in a compact list. */
+.integration-add {
+  margin-top: 16px;
+}
+.integration-add h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.integration-add-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+}
+.integration-add-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: var(--touch-target);
+  padding: 10px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.integration-add-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+.integration-add-plus {
+  grid-row: span 2;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* Member review scope. */
+.scope-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.scope-summary {
+  font-size: 14px;
+  color: var(--ink-secondary);
+}
+.scope-form {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--ground);
+}
+.scope-form legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+.scope-form .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
