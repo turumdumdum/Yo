@@ -2676,3 +2676,42 @@ summary:focus-visible {
   gap: 8px;
   margin-top: 8px;
 }
+
+/* Reviews: where each review is done, shown on its card. */
+.where-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+.where-control .segmented {
+  margin-bottom: 0;
+}
+.where-label {
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+.where-service {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.where-service select {
+  min-height: var(--touch-target);
+  max-width: 100%;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.services-panel {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--ground);
+}

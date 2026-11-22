@@ -24,9 +24,11 @@ import {
   resetWorkflowSettings,
   saveWorkflowSettings,
   listReviewServiceNames,
+  loadIntegrations,
+  type IntegrationsStatus,
 } from '../requests/api';
 import { ReviewFormEditor } from './ReviewFormEditor';
-import { ConnectGuideLink } from './ReviewServicesCard';
+import { ConnectGuideLink, ReviewServicesCard } from './ReviewServicesCard';
 
 // One card per review: when it is needed, how long the reviewer has, what they confirm,
 // and the form they fill in. Changes apply to requests submitted afterwards.
@@ -251,11 +253,151 @@ function StageSettingsEditor({
   );
 }
 
+/**
+ * Where one review happens, right on its card: on this platform, or in a connected
+ * service. Saves at once; connecting a new service opens the services panel.
+ */
+function WhereControl({
+  stage,
+  settings,
+  services,
+  onChange,
+  onConnect,
+}: {
+  stage: string;
+  settings: StageSettings;
+  services: { id: string; name: string }[] | null;
+  onChange: (next: StageSettings) => Promise<void>;
+  onConnect: () => void;
+}) {
+  const id = useId();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // "Another service" picked but not saved yet, because no service is chosen.
+  const [choosing, setChoosing] = useState(false);
+  const external = settings.handledBy === 'external' || choosing;
+
+  async function apply(next: StageSettings) {
+    setBusy(true);
+    setError(null);
+    try {
+      await onChange(next);
+      setChoosing(false);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function pickExternal() {
+    const first = services?.[0];
+    if (services && services.length === 1 && first) void apply({ ...settings, handledBy: 'external', serviceId: first.id });
+    else setChoosing(true);
+  }
+
+  return (
+    <div className="where-control">
+      <span className="where-label" id={`${id}-label`}>
+        Done
+      </span>
+      <div className="segmented" role="group" aria-labelledby={`${id}-label`}>
+        <button type="button" aria-pressed={!external} disabled={busy} onClick={() => void apply({ ...settings, handledBy: 'here' })}>
+          On this platform<span className="visually-hidden"> ({stage})</span>
+        </button>
+        <button type="button" aria-pressed={external} disabled={busy} onClick={pickExternal}>
+          In another service<span className="visually-hidden"> ({stage})</span>
+        </button>
+      </div>
+      {external && (
+        <div className="where-service">
+          {services === null ? (
+            <p role="status">Loading the services…</p>
+          ) : services.length === 0 ? (
+            <p className="field-hint">
+              No service is connected yet.{' '}
+              <button type="button" className="link-button" onClick={onConnect}>
+                Connect a service
+              </button>
+            </p>
+          ) : (
+            <>
+              <label htmlFor={`${id}-service`}>Service</label>
+              <select
+                id={`${id}-service`}
+                value={settings.handledBy === 'external' ? settings.serviceId ?? '' : ''}
+                disabled={busy}
+                onChange={(e) => e.target.value && void apply({ ...settings, handledBy: 'external', serviceId: e.target.value })}
+              >
+                {(settings.handledBy !== 'external' || !services.some((sv) => sv.id === settings.serviceId)) && (
+                  <option value="">{settings.serviceId && settings.handledBy === 'external' ? `${settings.serviceId} (not connected)` : 'Choose a service'}</option>
+                )}
+                {services.map((sv) => (
+                  <option key={sv.id} value={sv.id}>
+                    {sv.name}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="link-button" onClick={onConnect}>
+                Connect another service
+              </button>
+            </>
+          )}
+          {choosing && settings.handledBy !== 'external' && (
+            <button type="button" className="link-button" onClick={() => setChoosing(false)}>
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
+      <FormError message={error} />
+    </div>
+  );
+}
+
+/** Connected review services, managed from the Reviews page as well as Integrations. */
+function ServicesPanel({ supabase, onChanged, onClose }: { supabase: SupabaseClient; onChanged: () => void; onClose: () => void }) {
+  const [status, setStatus] = useState<IntegrationsStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try {
+      setStatus(await loadIntegrations(supabase));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }, [supabase]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  return (
+    <div className="services-panel">
+      <FormError message={error} />
+      {!status && !error && <p role="status">Loading…</p>}
+      {status && (
+        <ReviewServicesCard
+          supabase={supabase}
+          services={status.reviewServices ?? []}
+          encryptionReady={status.encryptionReady}
+          onChanged={async () => {
+            await load();
+            onChanged();
+          }}
+        />
+      )}
+      <button type="button" className="button button-secondary button-small" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  );
+}
+
 export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supabase: SupabaseClient; orgId: string; onOpenIntegrations?: () => void }) {
   const [services, setServices] = useState<{ id: string; name: string }[] | null>(null);
-  useEffect(() => {
+  const loadServices = useCallback(() => {
     listReviewServiceNames(supabase).then(setServices, () => setServices([]));
   }, [supabase]);
+  useEffect(loadServices, [loadServices]);
+  const [servicesOpen, setServicesOpen] = useState(false);
   const [settings, setSettings] = useState<WorkflowSettings | null>(null);
   const [isCustom, setIsCustom] = useState(false);
   const [customForms, setCustomForms] = useState<string[]>([]);
@@ -285,11 +427,12 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
 
   const labelOf = (key: string) => questions.find((q) => q.key === key)?.label ?? key;
 
-  async function saveStage(stage: string, next: StageSettings) {
+  async function saveStage(stage: string, next: StageSettings, keepOpen = false) {
     if (!settings) return;
     await saveWorkflowSettings(supabase, { ...settings, [stage]: next });
-    setOpen(null);
-    setNotice(`${stage} saved. Requests submitted from now on follow it; requests already sent keep their checks.`);
+    if (!keepOpen) setOpen(null);
+    const where = next.handledBy === 'external' ? ` It now runs in ${services?.find((sv) => sv.id === next.serviceId)?.name ?? 'another service'}.` : '';
+    setNotice(`${stage} saved.${where} Requests submitted from now on follow it; requests already sent keep their checks.`);
     await reload();
   }
 
@@ -297,9 +440,17 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
     <section className="card" aria-labelledby="reviews-heading">
       <h2 id="reviews-heading">Reviews</h2>
       <p className="field-hint">
-        Each request goes through these checks. For each one, choose when it is needed, how long the reviewer has, what they
-        confirm and what they fill in. Changes apply to requests submitted afterwards.
+        Each request goes through these checks. For each one, choose where it is done (on this platform or in another
+        service), when it is needed, how long the reviewer has, what they confirm and what they fill in. Changes apply to
+        requests submitted afterwards.
       </p>
+      <div className="question-actions">
+        <button type="button" className="button button-secondary button-small" aria-expanded={servicesOpen} onClick={() => setServicesOpen(!servicesOpen)}>
+          Connected services{services && services.length > 0 ? ` (${services.length})` : ''}
+        </button>
+        <ConnectGuideLink />
+      </div>
+      {servicesOpen && <ServicesPanel supabase={supabase} onChanged={loadServices} onClose={() => setServicesOpen(false)} />}
       <FormError message={error} />
       {notice && (
         <p className="notice notice-approved" role="status">
@@ -329,12 +480,27 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
                   </span>
                 </div>
                 <p className="review-card-summary">{describeRequirement(s, labelOf)}.</p>
+                {s.requirement !== 'never' && (
+                  <WhereControl
+                    stage={stage}
+                    settings={s}
+                    services={services}
+                    onChange={(next) => saveStage(stage, next, true)}
+                    onConnect={() => setServicesOpen(true)}
+                  />
+                )}
                 <ul className="review-card-facts">
                   <li>{s.requirement === 'never' ? '—' : `${s.slaBusinessDays} business ${s.slaBusinessDays === 1 ? 'day' : 'days'} to review`}</li>
-                  <li>
-                    {s.checklist.length} checklist {s.checklist.length === 1 ? 'item' : 'items'}
-                  </li>
-                  <li>{customForms.includes(stage) ? 'Own review form' : 'Standard review form'}</li>
+                  {s.handledBy === 'external' ? (
+                    <li>Checklist and form: in {services?.find((sv) => sv.id === s.serviceId)?.name ?? 'the service'}</li>
+                  ) : (
+                    <>
+                      <li>
+                        {s.checklist.length} checklist {s.checklist.length === 1 ? 'item' : 'items'}
+                      </li>
+                      <li>{customForms.includes(stage) ? 'Own review form' : 'Standard review form'}</li>
+                    </>
+                  )}
                 </ul>
                 <div className="question-actions">
                   <button
@@ -343,8 +509,10 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
                     aria-expanded={isOpen && open.panel === 'settings'}
                     onClick={() => setOpen(isOpen && open.panel === 'settings' ? null : { stage, panel: 'settings' })}
                   >
-                    When needed and checklist<span className="visually-hidden"> for {stage}</span>
+                    {s.handledBy === 'external' ? 'When needed' : 'When needed and checklist'}
+                    <span className="visually-hidden"> for {stage}</span>
                   </button>
+                  {s.handledBy !== 'external' && (
                   <button
                     type="button"
                     className="button button-secondary button-small"
@@ -353,6 +521,7 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
                   >
                     Review form<span className="visually-hidden"> for {stage}</span>
                   </button>
+                  )}
                 </div>
                 {isOpen && open.panel === 'settings' && (
                   <StageSettingsEditor
