@@ -35,8 +35,6 @@ import { ConnectGuideLink, ReviewServicesCard } from './ReviewServicesCard';
 
 type OneChoice = Extract<FieldDef, { options: unknown }>;
 
-const TONE: Record<StageSettings['requirement'], string> = { always: 'approved', by_risk: 'review', never: 'idle' };
-const SHORT: Record<StageSettings['requirement'], string> = { always: 'Always', by_risk: 'By risk', never: 'Off' };
 
 function StageSettingsEditor({
   stage,
@@ -253,6 +251,46 @@ function StageSettingsEditor({
   );
 }
 
+/** When a review is needed, switched right on its card; "Off" turns it off in one click. */
+function NeedControl({ stage, settings, onChange }: { stage: string; settings: StageSettings; onChange: (next: StageSettings) => Promise<void> }) {
+  const id = useId();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function pick(requirement: StageSettings['requirement']) {
+    if (requirement === settings.requirement) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onChange({ ...settings, requirement });
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const options: { value: StageSettings['requirement']; label: string }[] = [
+    { value: 'always', label: 'Always' },
+    { value: 'by_risk', label: `From ${settings.minTier} risk` },
+    { value: 'never', label: 'Off' },
+  ];
+  return (
+    <div className="where-control">
+      <span className="where-label" id={`${id}-label`}>
+        Needed
+      </span>
+      <div className="segmented" role="group" aria-labelledby={`${id}-label`}>
+        {options.map((o) => (
+          <button key={o.value} type="button" aria-pressed={settings.requirement === o.value} disabled={busy} onClick={() => void pick(o.value)}>
+            {o.label}
+            <span className="visually-hidden"> ({stage})</span>
+          </button>
+        ))}
+      </div>
+      <FormError message={error} />
+    </div>
+  );
+}
+
 /**
  * Where one review happens, right on its card: on this platform, or in a connected
  * service. Saves at once; connecting a new service opens the services panel.
@@ -432,7 +470,11 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
     await saveWorkflowSettings(supabase, { ...settings, [stage]: next });
     if (!keepOpen) setOpen(null);
     const where = next.handledBy === 'external' ? ` It now runs in ${services?.find((sv) => sv.id === next.serviceId)?.name ?? 'another service'}.` : '';
-    setNotice(`${stage} saved.${where} Requests submitted from now on follow it; requests already sent keep their checks.`);
+    setNotice(
+      next.requirement === 'never'
+        ? `${stage} is off. Requests submitted from now on skip it; requests already sent keep their checks.`
+        : `${stage} saved.${where} Requests submitted from now on follow it; requests already sent keep their checks.`,
+    );
     await reload();
   }
 
@@ -474,12 +516,10 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
                         {services?.find((sv) => sv.id === s.serviceId)?.name ?? 'External service'}
                       </span>
                     )}
-                    <span className="status-badge" data-tone={TONE[s.requirement]}>
-                      {SHORT[s.requirement]}
-                    </span>
                   </span>
                 </div>
                 <p className="review-card-summary">{describeRequirement(s, labelOf)}.</p>
+                <NeedControl stage={stage} settings={s} onChange={(next) => saveStage(stage, next, true)} />
                 {s.requirement !== 'never' && (
                   <WhereControl
                     stage={stage}
@@ -489,8 +529,10 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
                     onConnect={() => setServicesOpen(true)}
                   />
                 )}
+                {s.requirement !== 'never' && (
+                  <>
                 <ul className="review-card-facts">
-                  <li>{s.requirement === 'never' ? '—' : `${s.slaBusinessDays} business ${s.slaBusinessDays === 1 ? 'day' : 'days'} to review`}</li>
+                  <li>{`${s.slaBusinessDays} business ${s.slaBusinessDays === 1 ? 'day' : 'days'} to review`}</li>
                   {s.handledBy === 'external' ? (
                     <li>Checklist and form: in {services?.find((sv) => sv.id === s.serviceId)?.name ?? 'the service'}</li>
                   ) : (
@@ -523,6 +565,8 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
                   </button>
                   )}
                 </div>
+                  </>
+                )}
                 {isOpen && open.panel === 'settings' && (
                   <StageSettingsEditor
                     stage={stage}
