@@ -68,3 +68,29 @@ describe('supabaseRequestStore', () => {
     ).rejects.toBeInstanceOf(NotADraftError);
   });
 });
+
+describe('getCaller', () => {
+  const USER = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const token = (sub: string) => `x.${Buffer.from(JSON.stringify({ sub })).toString('base64url')}.sig`;
+  function fake(userId: string) {
+    const urls: string[] = [];
+    const impl = (async (url: string | URL | Request) => {
+      urls.push(String(url));
+      const body = String(url).includes('/auth/v1/user') ? { id: userId, email: 'a@example.com' } : [{ org_id: ID, role: 'org_admin' }];
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as typeof fetch;
+    return { impl, urls };
+  }
+
+  it('reads the user and the membership in parallel, filtered by the verified user', async () => {
+    const { impl, urls } = fake(USER);
+    expect(await supabaseRequestStore(config, impl).getCaller(token(USER))).toEqual({ userId: USER, orgId: ID, role: 'org_admin', email: 'a@example.com' });
+    expect(urls.find((u) => u.includes('/memberships'))).toContain(`user_id=eq.${USER}`);
+  });
+
+  it('refuses a token whose subject is not the verified user, or has none', async () => {
+    const other = '99999999-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    await expect(supabaseRequestStore(config, fake(USER).impl).getCaller(token(other))).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(supabaseRequestStore(config, fake(USER).impl).getCaller('not-a-jwt')).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+});

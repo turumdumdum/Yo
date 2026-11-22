@@ -26,6 +26,16 @@
   --font-heading: 'Space Grotesk Variable', var(--font-body);
   --radius: 10px;
   --touch-target: 44px;
+
+  /* One spacing scale for margins, paddings and gaps: 4-px steps up to 16, then 24/32/40/48. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
 }
 
 *,
@@ -66,14 +76,14 @@ a {
   left: 16px;
   top: 16px;
   background: var(--surface);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius);
 }
 
 .app-header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 0 16px;
+  padding: 0 var(--space-4);
   min-height: 56px;
   display: flex;
   align-items: center;
@@ -87,26 +97,26 @@ a {
 .page {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 24px clamp(16px, 3vw, 40px) 48px;
+  padding: var(--space-6) clamp(var(--space-4), 3vw, var(--space-10)) var(--space-12);
 }
 .page > h1 {
   font-size: 28px;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .lead {
   color: var(--ink-secondary);
-  margin: 0 0 24px;
+  margin: 0 0 var(--space-6);
 }
 
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px;
+  padding: var(--space-4);
 }
 .card h2 {
   font-size: 18px;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 
 .stage-list {
@@ -118,10 +128,10 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
   min-height: var(--touch-target);
-  padding: 8px 0;
+  padding: var(--space-2) 0;
   border-top: 1px solid var(--border);
 }
 .stage-list li:first-child {
@@ -130,7 +140,7 @@ a {
 
 .status-badge {
   display: inline-block;
-  padding: 2px 10px;
+  padding: 2px var(--space-3);
   border-radius: 999px;
   font-size: 13px;
   font-weight: 600;
@@ -160,36 +170,36 @@ a {
 /* Header actions */
 .app-header {
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 /* Forms */
 .auth-card {
   max-width: 440px;
-  margin: 24px auto 0;
-  padding: 24px;
+  margin: var(--space-6) auto 0;
+  padding: var(--space-6);
 }
 .auth-card h1 {
   font-size: 24px;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 .auth-card p {
   color: var(--ink-secondary);
-  margin: 0 0 16px;
+  margin: 0 0 var(--space-4);
 }
 
 .field {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 .field label {
   display: block;
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 .field input {
   width: 100%;
   min-height: var(--touch-target);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   color: var(--ink);
   background: var(--surface);
@@ -202,24 +212,24 @@ a {
 .field-hint {
   font-size: 14px;
   color: var(--ink-tertiary);
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
 }
 .auth-card .field-hint {
   color: var(--ink-tertiary);
-  margin-bottom: 6px;
+  margin-bottom: var(--space-2);
 }
 .field-error,
 .form-error {
   color: #8c1d18;
   font-size: 14px;
-  margin: 6px 0 0;
+  margin: var(--space-2) 0 0;
 }
 .form-error {
   background: #fbe9e7;
   border: 1px solid #f1b5ae;
   border-radius: 8px;
-  padding: 8px 12px;
-  margin: 0 0 16px;
+  padding: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-4);
 }
 
 .button {
@@ -227,7 +237,7 @@ a {
   align-items: center;
   justify-content: center;
   min-height: var(--touch-target);
-  padding: 8px 18px;
+  padding: var(--space-2) var(--space-4);
   font: inherit;
   font-weight: 600;
   color: #ffffff;
@@ -267,12 +277,12 @@ a {
   cursor: pointer;
 }
 .auth-switch {
-  margin-top: 16px !important;
+  margin-top: var(--space-4) !important;
 }
 
 .qr-code {
   display: block;
-  margin: 0 auto 12px;
+  margin: 0 auto var(--space-3);
   background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -285,8 +295,8 @@ a {
 .details {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 4px 16px;
-  margin: 0 0 12px;
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-3);
 }
 .details dt {
   color: var(--ink-tertiary);
@@ -299,19 +309,19 @@ a {
 /* Organization line and request list */
 .org-line {
   color: var(--ink-secondary);
-  margin: 0 0 16px;
+  margin: 0 0 var(--space-4);
   overflow-wrap: anywhere;
 }
 .card + .card {
-  margin-top: 16px;
+  margin-top: var(--space-4);
 }
 .card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 .card-head h2 {
   margin: 0;
@@ -331,11 +341,11 @@ a {
 .request-row {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 4px 12px;
+  gap: var(--space-1) var(--space-3);
   align-items: center;
   width: 100%;
   min-height: var(--touch-target);
-  padding: 12px 4px;
+  padding: var(--space-3) var(--space-1);
   font: inherit;
   color: inherit;
   text-align: left;
@@ -362,7 +372,7 @@ a {
 }
 .badges {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   flex-wrap: wrap;
   margin: 0;
 }
@@ -371,20 +381,20 @@ a {
 .request-form > h1,
 .request-detail > h1 {
   font-size: 28px;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
   overflow-wrap: anywhere;
 }
 .request-form > .badges,
 .request-detail > .badges {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 .form-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .save-state {
   margin: 0;
@@ -398,8 +408,8 @@ a {
 .stepper {
   list-style: none;
   display: flex;
-  gap: 4px;
-  margin: 0 0 16px;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-4);
   padding: 0;
 }
 /* One line at any width: other steps shrink and cut their titles, the current one stays whole. */
@@ -418,10 +428,10 @@ a {
 .stepper button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
   min-height: var(--touch-target);
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   font-size: 14px;
   color: var(--ink-secondary);
@@ -464,30 +474,30 @@ a {
 }
 
 .form-card {
-  padding: 24px;
+  padding: var(--space-6);
   max-width: 720px;
 }
 .form-card h1 {
   font-size: 24px;
-  margin-bottom: 20px;
+  margin-bottom: var(--space-6);
 }
 .form-card h1:focus {
   outline: none;
 }
 .form-card h2 {
   font-size: 18px;
-  margin: 24px 0 12px;
+  margin: var(--space-6) 0 var(--space-3);
 }
 .step-count {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
   font-size: 14px;
   color: var(--ink-tertiary);
 }
 .form-actions {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 fieldset.field {
@@ -499,7 +509,7 @@ fieldset.field {
 .field legend {
   font-weight: 600;
   padding: 0;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 .optional {
   font-weight: 400;
@@ -514,7 +524,7 @@ fieldset.field {
 .field textarea {
   width: 100%;
   min-height: var(--touch-target);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   color: var(--ink);
   background: var(--surface);
@@ -535,7 +545,7 @@ fieldset.field {
 .choice {
   display: flex !important;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   min-height: var(--touch-target);
   font-weight: 400 !important;
   margin: 0 !important;
@@ -554,28 +564,28 @@ fieldset.field {
   background: var(--status-waiting-bg);
   color: var(--status-waiting-fg);
   border-radius: var(--radius);
-  padding: 12px 16px;
-  margin: 16px 0;
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-4) 0;
 }
 .hints h2 {
   font-size: 16px;
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 .hints ul {
   margin: 0;
-  padding-left: 20px;
+  padding-left: var(--space-6);
 }
 
 .summary-section + .summary-section {
   border-top: 1px solid var(--border);
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
 }
 .summary-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .summary-head h3 {
   font-size: 16px;
@@ -586,20 +596,20 @@ fieldset.field {
 .details-row {
   display: grid;
   grid-template-columns: minmax(120px, 2fr) 3fr;
-  gap: 12px;
-  padding: 4px 0;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
 }
 .details-row dd {
   font-weight: 400;
   overflow-wrap: anywhere;
 }
 .plain-list {
-  margin: 0 0 12px;
-  padding-left: 20px;
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-6);
 }
 .link-button.danger {
   color: #8c1d18;
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 .visually-hidden {
   position: absolute;
@@ -612,14 +622,14 @@ fieldset.field {
 
 /* Review stages */
 .progress-text {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
   color: var(--ink-secondary);
 }
 .progress-line {
   display: block;
   width: 100%;
   height: 8px;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
   border: 0;
   border-radius: 999px;
   overflow: hidden;
@@ -651,14 +661,14 @@ fieldset.field {
 /* Tabs */
 .tabs {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
   border-bottom: 1px solid var(--border);
 }
 .tabs button {
   min-height: var(--touch-target);
-  padding: 8px 16px;
+  padding: var(--space-2) var(--space-4);
   font: inherit;
   font-weight: 600;
   color: var(--ink-secondary);
@@ -678,12 +688,12 @@ fieldset.field {
   background: var(--accent-tint);
   border: 1px solid #c9d2f6;
   border-radius: var(--radius);
-  padding: 10px 14px;
-  margin: 0 0 16px;
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-4);
   color: var(--ink);
 }
 .notice p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 .notice-approved {
   background: var(--status-approved-bg);
@@ -703,7 +713,7 @@ fieldset.field {
 .stage-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
   min-height: var(--touch-target);
 }
@@ -711,22 +721,22 @@ fieldset.field {
   flex: 1 1 200px;
 }
 .stage-panel {
-  margin: 12px 0 8px;
-  padding: 16px;
+  margin: var(--space-3) 0 var(--space-2);
+  padding: var(--space-4);
   background: var(--ground);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 .stage-panel .decision p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
   overflow-wrap: anywhere;
 }
 .focus-answers {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
 }
 .focus-answers summary {
   font-weight: 600;
@@ -735,7 +745,7 @@ fieldset.field {
 }
 .button-small {
   min-height: var(--touch-target);
-  padding: 6px 12px;
+  padding: var(--space-2) var(--space-3);
   font-size: 14px;
 }
 .button-danger {
@@ -750,15 +760,15 @@ fieldset.field {
 /* Admin */
 .member-list {
   list-style: none;
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
   padding: 0;
 }
 .member-list li {
   display: flex;
   align-items: center;
-  gap: 8px 12px;
+  gap: var(--space-2) var(--space-3);
   flex-wrap: wrap;
-  padding: 8px 0;
+  padding: var(--space-2) 0;
   border-top: 1px solid var(--border);
 }
 .member-list li:first-child {
@@ -771,7 +781,7 @@ fieldset.field {
 .role-select,
 .filters input {
   min-height: var(--touch-target);
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   color: var(--ink);
   background: var(--surface);
@@ -781,12 +791,12 @@ fieldset.field {
 .invite-form {
   display: grid;
   grid-template-columns: 2fr 1fr auto;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: end;
 }
 .invite-form .field,
 .invite-form .button {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 @media (max-width: 640px) {
   .invite-form {
@@ -796,7 +806,7 @@ fieldset.field {
 }
 .card h3 {
   font-size: 16px;
-  margin: 16px 0 8px;
+  margin: var(--space-4) 0 var(--space-2);
 }
 
 /* Optional AI assistance */
@@ -804,14 +814,14 @@ fieldset.field {
   border: 1px dashed #9aa7e8;
   background: var(--accent-tint);
   border-radius: var(--radius);
-  padding: 12px 16px;
-  margin: 0 0 20px;
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-6);
 }
 .ai-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px 12px;
+  gap: var(--space-2) var(--space-3);
   flex-wrap: wrap;
 }
 .form-card .ai-assist h2 {
@@ -820,26 +830,26 @@ fieldset.field {
 }
 .ai-list {
   list-style: none;
-  margin: 8px 0;
+  margin: var(--space-2) 0;
   padding: 0;
 }
 .ai-list li {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: var(--space-3) var(--space-3);
+  margin-bottom: var(--space-2);
 }
 .ai-list p {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
   overflow-wrap: anywhere;
 }
 .ai-list .form-actions {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 .suggested-tag {
   display: inline-block;
-  padding: 1px 8px;
+  padding: 1px var(--space-2);
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
@@ -849,28 +859,28 @@ fieldset.field {
 
 /* AI suggestion under a field */
 .suggestion {
-  margin-top: 8px;
-  padding: 8px 12px;
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   background: var(--accent-tint);
   border: 1px dashed #9aa7e8;
   border-radius: 8px;
 }
 .suggestion p {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
   overflow-wrap: anywhere;
 }
 .suggestion-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  margin-top: 6px;
+  margin-top: var(--space-2);
 }
 
 /* Admin: filters, import, domains */
 .filters {
   display: grid;
   grid-template-columns: 2fr 1fr;
-  gap: 12px;
+  gap: var(--space-3);
 }
 @media (max-width: 640px) {
   .filters {
@@ -888,11 +898,11 @@ fieldset.field {
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .segmented button {
   min-height: var(--touch-target);
-  padding: 6px 14px;
+  padding: var(--space-2) var(--space-4);
   font: inherit;
   font-weight: 600;
   color: var(--ink-secondary);
@@ -905,7 +915,7 @@ fieldset.field {
   background: var(--accent);
 }
 .format-help {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 .format-help summary {
   font-weight: 600;
@@ -916,12 +926,12 @@ fieldset.field {
   background: var(--ground);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   font-size: 13px;
   overflow-x: auto;
 }
 .import-preview {
-  margin-top: 16px;
+  margin-top: var(--space-4);
 }
 .problems {
   color: #8c1d18;
@@ -930,25 +940,25 @@ fieldset.field {
 .table {
   width: 100%;
   border-collapse: collapse;
-  margin: 8px 0 12px;
+  margin: var(--space-2) 0 var(--space-3);
   font-size: 14px;
 }
 .table th,
 .table td {
   text-align: left;
-  padding: 6px 8px;
+  padding: var(--space-2) var(--space-2);
   border-bottom: 1px solid var(--border);
   overflow-wrap: anywhere;
 }
 .domain-form {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: end;
 }
 .domain-form .field,
 .domain-form .button {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 
 /* Review forms */
@@ -956,8 +966,8 @@ fieldset.field {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
 }
 .stage-review-form h3 {
   font-size: 16px;
@@ -965,13 +975,13 @@ fieldset.field {
 }
 .review-section + .review-section {
   border-top: 1px solid var(--border);
-  padding-top: 8px;
+  padding-top: var(--space-2);
 }
 .review-section h4,
 .review-form .hints h4 {
   font-family: var(--font-heading);
   font-size: 15px;
-  margin: 12px 0 8px;
+  margin: var(--space-3) 0 var(--space-2);
 }
 .review-form .hints h4 {
   margin-top: 0;
@@ -979,11 +989,11 @@ fieldset.field {
 .choices-columns {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  column-gap: 12px;
+  column-gap: var(--space-3);
 }
 .field-hint.missing {
   color: #8c1d18;
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 .field input:not([type='checkbox']):not([type='radio']):not([type='file']) {
   width: 100%;
@@ -992,21 +1002,21 @@ fieldset.field {
 /* Review form editor */
 .editor-list {
   list-style: none;
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
   padding: 0;
   counter-reset: editor;
 }
 .editor-field {
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 12px;
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
   background: var(--ground);
 }
 .editor-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0 12px;
+  gap: 0 var(--space-3);
 }
 @media (max-width: 640px) {
   .editor-row {
@@ -1015,7 +1025,7 @@ fieldset.field {
 }
 .editor-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 .field.narrow {
@@ -1025,7 +1035,7 @@ fieldset.field {
   position: sticky;
   bottom: 0;
   background: var(--surface);
-  padding: 12px 0;
+  padding: var(--space-3) 0;
   border-top: 1px solid var(--border);
 }
 
@@ -1035,60 +1045,60 @@ fieldset.field {
   color: var(--status-waiting-fg);
   border: 1px solid #f0d394;
   border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 16px;
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 .action-required h2 {
   font-size: 18px;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .action-required p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 .action-question {
   background: var(--surface);
   color: var(--ink);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 12px;
-  margin-top: 8px;
+  padding: var(--space-3);
+  margin-top: var(--space-2);
 }
 .action-question label {
   display: block;
   font-weight: 600;
-  margin: 8px 0 4px;
+  margin: var(--space-2) 0 var(--space-1);
 }
 .action-question textarea,
 .stage-questions textarea {
   width: 100%;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   color: var(--ink);
   background: var(--surface);
   border: 1px solid #8a94a3;
   border-radius: 8px;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .stage-questions {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
 }
 .stage-questions h3 {
   font-size: 16px;
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 .thread {
   list-style: none;
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
   padding: 0;
 }
 .thread li {
   border-left: 3px solid var(--border);
-  padding-left: 12px;
-  margin-bottom: 12px;
+  padding-left: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 .thread-meta {
   font-size: 13px;
@@ -1096,28 +1106,28 @@ fieldset.field {
   margin: 0 0 2px;
 }
 .thread-text {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .thread-answer {
   background: var(--accent-tint);
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
 }
 
 /* Attachments */
 .upload-form {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) 2fr auto;
-  gap: 0 12px;
+  gap: 0 var(--space-3);
   align-items: start;
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
   border-top: 1px solid var(--border);
 }
 .upload-form .button {
-  margin-top: 28px;
+  margin-top: var(--space-8);
 }
 .upload-form .role-select {
   width: 100%;
@@ -1141,12 +1151,12 @@ fieldset.field {
 }
 .button-large {
   min-height: 52px;
-  padding: 12px 28px;
+  padding: var(--space-3) var(--space-8);
   font-size: 17px;
 }
 .step-description {
   color: var(--ink-secondary);
-  margin: -12px 0 16px;
+  margin: -12px 0 var(--space-4);
 }
 
 /* Tabs with counts */
@@ -1156,8 +1166,8 @@ fieldset.field {
   justify-content: center;
   min-width: 22px;
   height: 22px;
-  margin-left: 6px;
-  padding: 0 6px;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
   border-radius: 999px;
   background: var(--accent);
   color: #ffffff;
@@ -1168,22 +1178,22 @@ fieldset.field {
 /* Empty state and how it works */
 .empty-state {
   text-align: center;
-  padding: 24px 8px 8px;
+  padding: var(--space-6) var(--space-2) var(--space-2);
 }
 .empty-state p {
   color: var(--ink-secondary);
-  margin: 0 0 16px;
+  margin: 0 0 var(--space-4);
 }
 .how-it-works {
-  margin-top: 16px;
-  padding: 16px 20px;
+  margin-top: var(--space-4);
+  padding: var(--space-4) var(--space-6);
   border-radius: var(--radius);
   background: var(--accent-tint);
   border: 1px solid #d5dcf8;
 }
 .how-it-works h2 {
   font-size: 18px;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 .how-it-works.compact h2 {
   font-size: 16px;
@@ -1193,12 +1203,12 @@ fieldset.field {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 .how-steps li {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: flex-start;
 }
 .how-number {
@@ -1221,19 +1231,19 @@ fieldset.field {
 .list-tools {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-2);
 }
 .chips button {
   min-height: 40px;
-  padding: 6px 12px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   font-size: 14px;
   font-weight: 600;
@@ -1260,7 +1270,7 @@ fieldset.field {
 .search-field input {
   width: 100%;
   min-height: var(--touch-target);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   border: 1px solid #8a94a3;
   border-radius: 8px;
@@ -1270,14 +1280,14 @@ fieldset.field {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 10px;
+  gap: var(--space-3);
 }
 .request-card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   width: 100%;
-  padding: 14px 16px;
+  padding: var(--space-4) var(--space-4);
   font: inherit;
   color: inherit;
   text-align: left;
@@ -1297,7 +1307,7 @@ fieldset.field {
 .request-card-top {
   display: flex;
   justify-content: space-between;
-  gap: 8px 12px;
+  gap: var(--space-2) var(--space-3);
   flex-wrap: wrap;
   align-items: center;
 }
@@ -1314,8 +1324,8 @@ fieldset.field {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 16px;
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 .progress-panel.decided-approved {
   background: var(--status-approved-bg);
@@ -1327,17 +1337,17 @@ fieldset.field {
 }
 .progress-steps {
   list-style: none;
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
   padding: 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: var(--space-2);
 }
 .progress-steps li {
   display: flex;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: center;
-  padding-top: 8px;
+  padding-top: var(--space-2);
   border-top: 4px solid var(--border);
 }
 .progress-steps li[data-state='done'] {
@@ -1390,13 +1400,13 @@ li[data-state='current'] .progress-dot {
 .admin-layout {
   display: grid;
   grid-template-columns: 220px 1fr;
-  gap: 16px;
+  gap: var(--space-4);
   align-items: start;
 }
 .admin-nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   position: sticky;
   top: 12px;
 }
@@ -1405,7 +1415,7 @@ li[data-state='current'] .progress-dot {
   flex-direction: column;
   align-items: flex-start;
   min-height: var(--touch-target);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   text-align: left;
   color: var(--ink);
@@ -1435,7 +1445,7 @@ li[data-state='current'] .progress-dot {
 }
 .admin-content > .card + .card,
 .admin-content > section + section {
-  margin-top: 16px;
+  margin-top: var(--space-4);
 }
 @media (max-width: 760px) {
   .admin-layout {
@@ -1445,7 +1455,7 @@ li[data-state='current'] .progress-dot {
     position: static;
     flex-direction: row;
     overflow-x: auto;
-    padding-bottom: 4px;
+    padding-bottom: var(--space-1);
   }
   .admin-nav button {
     flex: none;
@@ -1461,14 +1471,14 @@ li[data-state='current'] .progress-dot {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 10px;
+  gap: var(--space-3);
 }
 .form-list li {
   display: flex;
   justify-content: space-between;
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
   flex-wrap: wrap;
-  padding: 12px 14px;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
@@ -1477,34 +1487,34 @@ li[data-state='current'] .progress-dot {
   background: #f4fbf6;
 }
 .form-list p {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
 }
 .question-actions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-2);
   flex-wrap: wrap;
   align-items: flex-start;
 }
 .form-steps-editor {
   list-style: none;
-  margin: 16px 0;
+  margin: var(--space-4) 0;
   padding: 0;
   display: grid;
-  gap: 16px;
+  gap: var(--space-4);
 }
 .step-editor {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: var(--space-4);
   background: var(--ground);
 }
 .step-editor-head {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: flex-end;
 }
 .step-editor-head .step-number {
-  margin-bottom: 26px;
+  margin-bottom: var(--space-6);
   background: var(--accent);
   color: #ffffff;
 }
@@ -1513,16 +1523,16 @@ li[data-state='current'] .progress-dot {
 }
 .question-list {
   list-style: none;
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .question-row {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: var(--space-3) var(--space-3);
 }
 .question-row.open {
   border-color: var(--accent);
@@ -1530,7 +1540,7 @@ li[data-state='current'] .progress-dot {
 .question-summary {
   display: flex;
   justify-content: space-between;
-  gap: 8px 12px;
+  gap: var(--space-2) var(--space-3);
   flex-wrap: wrap;
 }
 .question-text {
@@ -1543,7 +1553,7 @@ li[data-state='current'] .progress-dot {
 .lock-tag {
   align-self: flex-start;
   margin: 2px 0;
-  padding: 1px 8px;
+  padding: 1px var(--space-2);
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
@@ -1555,8 +1565,8 @@ li[data-state='current'] .progress-dot {
   color: var(--status-waiting-fg);
 }
 .question-editor {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
   border-top: 1px solid var(--border);
 }
 .question-editor input:disabled,
@@ -1571,41 +1581,41 @@ li[data-state='current'] .progress-dot {
   width: 100%;
 }
 .form-preview .preview-step {
-  margin-top: 12px;
+  margin-top: var(--space-3);
   max-width: none;
 }
 .form-preview h3 {
   font-size: 20px;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
 }
 .step-toggle {
   display: block;
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 
 /* Risk settings in the form editor */
 .risk-editor {
-  margin-top: 8px;
-  padding: 12px;
+  margin-top: var(--space-2);
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--ground);
 }
 .risk-editor legend {
-  padding: 0 4px;
+  padding: 0 var(--space-1);
   font-weight: 700;
 }
 .risk-rows {
   list-style: none;
-  margin: 8px 0;
+  margin: var(--space-2) 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .risk-rows li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
 }
 .risk-rows li:has(input) {
@@ -1629,8 +1639,8 @@ li[data-state='current'] .progress-dot {
   }
 }
 .form-settings {
-  margin: 4px 0 16px;
-  padding: 12px 16px;
+  margin: var(--space-1) 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -1651,19 +1661,19 @@ li[data-state='current'] .progress-dot {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .preview-risk {
-  margin-top: 12px;
+  margin-top: var(--space-3);
   max-width: none;
   border-left: 4px solid var(--accent);
 }
 .preview-risk ul {
-  margin: 8px 0 0;
-  padding-left: 20px;
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-6);
 }
 
 /* Request form: progress, welcome, choice cards */
 .form-progress {
   max-width: 720px;
-  margin: -4px 0 16px;
+  margin: -4px 0 var(--space-4);
 }
 .progress-track {
   height: 8px;
@@ -1684,29 +1694,29 @@ li[data-state='current'] .progress-dot {
   }
 }
 .form-progress p {
-  margin: 6px 0 0;
+  margin: var(--space-2) 0 0;
   font-size: 14px;
   color: var(--ink-secondary);
 }
 .welcome {
   max-width: 720px;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
   background: var(--accent-tint);
   border-color: transparent;
 }
 .welcome h2 {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
   font-size: 18px;
 }
 .welcome ul,
 .what-next ol {
   margin: 0;
-  padding-left: 20px;
+  padding-left: var(--space-6);
   line-height: 1.6;
 }
 .what-next {
-  margin: 24px 0 8px;
-  padding: 16px;
+  margin: var(--space-6) 0 var(--space-2);
+  padding: var(--space-4);
   border-radius: var(--radius);
   background: var(--ground);
 }
@@ -1714,10 +1724,10 @@ li[data-state='current'] .progress-dot {
   margin-top: 0 !important;
 }
 .form-card .choices {
-  gap: 8px;
+  gap: var(--space-2);
 }
 .form-card .choices .choice {
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -1736,15 +1746,15 @@ li[data-state='current'] .progress-dot {
 }
 
 .button-arrow {
-  margin-left: 6px;
+  margin-left: var(--space-2);
 }
 
 /* Start screen views */
 .view-tiles {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin: 4px 0 16px;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 var(--space-4);
 }
 @media (max-width: 640px) {
   .view-tiles {
@@ -1756,9 +1766,9 @@ li[data-state='current'] .progress-dot {
   grid-template-columns: auto 1fr;
   grid-template-areas: 'icon count' 'label label';
   align-items: center;
-  gap: 4px 8px;
+  gap: var(--space-1) var(--space-2);
   min-height: 88px;
-  padding: 12px;
+  padding: var(--space-3);
   text-align: left;
   font: inherit;
   color: var(--ink);
@@ -1817,12 +1827,12 @@ li[data-state='current'] .progress-dot {
 .view-heading {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 8px 0 12px;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-3);
   font-size: 18px;
 }
 .search-field {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .confidential-badge {
   background: #2b2f38;
@@ -1835,20 +1845,20 @@ li[data-state='current'] .progress-dot {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 12px;
-  margin-top: 12px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 /* Admin: review cards */
 .review-cards {
   list-style: none;
-  margin: 16px 0;
+  margin: var(--space-4) 0;
   padding: 0;
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .review-card {
-  padding: 16px;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -1860,21 +1870,21 @@ li[data-state='current'] .progress-dot {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .review-card-head h3 {
   margin: 0;
   font-size: 18px;
 }
 .review-card-summary {
-  margin: 8px 0 4px;
+  margin: var(--space-2) 0 var(--space-1);
   font-weight: 600;
 }
 .review-card-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
-  margin: 0 0 12px;
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-3);
   padding: 0;
   list-style: none;
   font-size: 14px;
@@ -1882,12 +1892,12 @@ li[data-state='current'] .progress-dot {
 }
 .stage-settings,
 .embedded-editor {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
   border-top: 1px solid var(--border);
 }
 .field.nested {
-  margin: 4px 0 8px 30px;
+  margin: var(--space-1) 0 var(--space-2) var(--space-8);
 }
 .stage-settings input[type='number'] {
   max-width: 10rem;
@@ -1897,8 +1907,8 @@ li[data-state='current'] .progress-dot {
 .view-more {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: -8px 0 16px;
+  gap: var(--space-2);
+  margin: -8px 0 var(--space-4);
 }
 .lifecycle-banner {
   border-left: 4px solid var(--ink-tertiary);
@@ -1916,13 +1926,13 @@ li[data-state='current'] .progress-dot {
 
 /* AI check: proposed fixes */
 .ai-fix {
-  margin-top: 8px;
-  padding: 8px 12px;
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-radius: 8px;
   background: var(--accent-tint);
 }
 .ai-fix p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 .ai-accepted {
   color: var(--status-approved-fg);
@@ -1933,9 +1943,9 @@ li[data-state='current'] .progress-dot {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin: 12px 0;
-  padding: 12px;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
   border: 1px solid var(--accent);
   border-radius: var(--radius);
 }
@@ -1945,21 +1955,21 @@ li[data-state='current'] .progress-dot {
 }
 .ai-list li.ai-warning {
   border-left: 3px solid var(--status-waiting-fg);
-  padding-left: 8px;
+  padding-left: var(--space-2);
 }
 .ai-field-groups {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
 }
 .ai-field-step {
-  margin: 8px 0 0;
+  margin: var(--space-2) 0 0;
   font-weight: 700;
 }
 
 /* Security baseline and exceptions */
 .config-group h3 {
-  margin: 20px 0 8px;
+  margin: var(--space-6) 0 var(--space-2);
   font-size: 16px;
 }
 .config-list,
@@ -1968,11 +1978,11 @@ li[data-state='current'] .progress-dot {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .config-item,
 .exception-item {
-  padding: 12px;
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -1987,12 +1997,12 @@ li[data-state='current'] .progress-dot {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .config-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
 }
 .config-title input {
   width: 22px;
@@ -2000,10 +2010,10 @@ li[data-state='current'] .progress-dot {
   accent-color: var(--accent);
 }
 .config-text {
-  margin: 6px 0 4px;
+  margin: var(--space-2) 0 var(--space-1);
 }
 .config-actions {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 .config-actions button[aria-pressed='true'] {
   border-color: var(--accent);
@@ -2011,8 +2021,8 @@ li[data-state='current'] .progress-dot {
 }
 .exception-form,
 .control-editor {
-  margin-top: 10px;
-  padding: 12px;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
   border-radius: 8px;
   background: var(--ground);
 }
@@ -2026,8 +2036,8 @@ li[data-state='current'] .progress-dot {
 .exception-facts {
   display: grid;
   grid-template-columns: minmax(8rem, max-content) 1fr;
-  gap: 4px 12px;
-  margin: 10px 0;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-3) 0;
   font-size: 14px;
 }
 .exception-facts dt {
@@ -2042,21 +2052,21 @@ li[data-state='current'] .progress-dot {
     grid-template-columns: 1fr;
   }
   .exception-facts dd {
-    margin-bottom: 6px;
+    margin-bottom: var(--space-2);
   }
 }
 .security-config .progress-track {
-  margin: 8px 0 12px;
+  margin: var(--space-2) 0 var(--space-3);
 }
 
 /* Review: stage panel with tabs */
 .stage-item.your-turn {
   border-left: 4px solid var(--accent);
-  padding-left: 8px;
+  padding-left: var(--space-2);
 }
 .your-turn-tag {
-  margin-left: 8px;
-  padding: 1px 8px;
+  margin-left: var(--space-2);
+  padding: 1px var(--space-2);
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
@@ -2069,7 +2079,7 @@ li[data-state='current'] .progress-dot {
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
 }
 .stage-panel-head .field {
   flex: 1 1 260px;
@@ -2079,7 +2089,7 @@ li[data-state='current'] .progress-dot {
   width: 100%;
 }
 .stage-due {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
   font-size: 14px;
   font-weight: 600;
   color: var(--ink-secondary);
@@ -2090,17 +2100,17 @@ li[data-state='current'] .progress-dot {
 .stage-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin: 16px 0 0;
+  gap: var(--space-1);
+  margin: var(--space-4) 0 0;
   border-bottom: 1px solid var(--border);
 }
 .stage-tabs button {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   min-height: var(--touch-target);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   font-size: 14px;
   font-weight: 600;
@@ -2126,22 +2136,22 @@ li[data-state='current'] .progress-dot {
   outline-offset: -2px;
 }
 .tab-badge {
-  padding: 0 7px;
+  padding: 0 var(--space-2);
   border-radius: 999px;
   font-size: 12px;
   background: var(--status-idle-bg);
   color: var(--status-idle-fg);
 }
 .stage-tab-panel {
-  padding: 16px 0 4px;
+  padding: var(--space-4) 0 var(--space-1);
 }
 .stage-tab-panel h4 {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 
 /* Review form sections */
 details.review-section {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -2151,9 +2161,9 @@ details.review-section > summary {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 4px 12px;
+  gap: var(--space-1) var(--space-3);
   min-height: var(--touch-target);
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   cursor: pointer;
   list-style: none;
 }
@@ -2163,7 +2173,7 @@ details.review-section > summary::-webkit-details-marker {
 details.review-section > summary::before {
   content: '▸';
   color: var(--ink-tertiary);
-  margin-right: 4px;
+  margin-right: var(--space-1);
 }
 details.review-section[open] > summary::before {
   content: '▾';
@@ -2184,19 +2194,19 @@ details.review-section.is-complete > summary .review-section-progress {
   color: var(--status-approved-fg);
 }
 details.review-section > :not(summary) {
-  margin-left: 12px;
-  margin-right: 12px;
+  margin-left: var(--space-3);
+  margin-right: var(--space-3);
 }
 details.review-section[open] {
-  padding-bottom: 8px;
+  padding-bottom: var(--space-2);
 }
 
 /* Checklist as cards */
 .checklist-cards {
-  gap: 8px;
+  gap: var(--space-2);
 }
 .checklist-cards .choice {
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -2208,16 +2218,16 @@ details.review-section[open] {
 /* Decision */
 .readiness {
   list-style: none;
-  margin: 0 0 16px;
+  margin: 0 0 var(--space-4);
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: var(--space-2);
 }
 .readiness li {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-radius: 8px;
 }
 .readiness li > span:first-child {
@@ -2260,13 +2270,13 @@ details.review-section[open] {
 }
 .decision-cards {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .decision-card {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 12px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
@@ -2302,20 +2312,20 @@ details.review-section[open] {
   color: var(--status-waiting-fg);
 }
 .decide > .button {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 /* Review queue */
 .queue-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px;
-  margin: 8px 0 16px;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-4);
 }
 .queue-stat {
   display: grid;
   gap: 2px;
-  padding: 12px;
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--ink);
@@ -2340,13 +2350,13 @@ details.review-section[open] {
   font-size: 14px;
 }
 .queue-group {
-  margin-top: 20px;
+  margin-top: var(--space-6);
 }
 .queue-group h3 {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 0 4px;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
   font-size: 18px;
 }
 .queue-group.group-overdue h3 {
@@ -2356,11 +2366,11 @@ details.review-section[open] {
 /* Integrations, guides, vendor risk */
 .integration-cards {
   display: grid;
-  gap: 12px;
-  margin-top: 12px;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 .integration-card {
-  padding: 16px;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -2370,31 +2380,31 @@ details.review-section[open] {
   font-size: 18px;
 }
 .review-guide h4 {
-  margin: 12px 0 4px;
+  margin: var(--space-3) 0 var(--space-1);
   font-size: 16px;
 }
 .review-guide h4:first-child {
   margin-top: 0;
 }
 .review-guide ul {
-  margin: 0 0 8px;
-  padding-left: 20px;
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-6);
   line-height: 1.6;
 }
 .review-guide p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
   line-height: 1.6;
 }
 .external-stage {
-  padding: 12px;
+  padding: var(--space-3);
   border-radius: 8px;
   background: var(--status-waiting-bg);
 }
 .external-stage p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
 }
 .risk-snapshot {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
 .risk-score {
   font-family: var(--font-heading);
@@ -2404,8 +2414,8 @@ details.review-section[open] {
 .risk-categories {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 4px 16px;
-  margin: 8px 0;
+  gap: var(--space-1) var(--space-4);
+  margin: var(--space-2) 0;
   padding: 0;
   list-style: none;
   font-size: 14px;
@@ -2413,7 +2423,7 @@ details.review-section[open] {
 .risk-categories li {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
   border-bottom: 1px solid var(--border);
 }
 
@@ -2422,7 +2432,7 @@ details.review-section[open] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .secret-row input {
   flex: 1 1 240px;
@@ -2434,8 +2444,8 @@ details.review-section[open] {
   overflow-wrap: anywhere;
 }
 .service-form {
-  margin-top: 10px;
-  padding: 12px;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
   border-radius: 8px;
   background: var(--ground);
 }
@@ -2443,7 +2453,7 @@ details.review-section[open] {
   display: inline;
 }
 .connect-guide ol {
-  padding-left: 20px;
+  padding-left: var(--space-6);
   line-height: 1.6;
 }
 .connect-guide pre {
@@ -2451,7 +2461,7 @@ details.review-section[open] {
   font-size: 13px;
 }
 .delivery-log {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 .delivery-log summary {
   cursor: pointer;
@@ -2487,8 +2497,8 @@ details.review-section[open] {
   top: 0;
   z-index: 20;
   background: var(--ground);
-  margin: -8px 0 16px;
-  padding-top: 8px;
+  margin: -8px 0 var(--space-4);
+  padding-top: var(--space-2);
 }
 .workspace-bar .tabs {
   margin-bottom: 0;
@@ -2497,14 +2507,14 @@ details.review-section[open] {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
   flex-wrap: wrap;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .view-as-form {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 .view-as-form label {
@@ -2535,10 +2545,10 @@ summary:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
   flex-wrap: wrap;
-  margin: 0 0 16px;
-  padding: 10px 16px;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid #f0d49b;
   border-radius: var(--radius);
   background: var(--status-waiting-bg);
@@ -2546,7 +2556,7 @@ summary:focus-visible {
 }
 .workspace-bar .preview-banner {
   position: static;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 .readonly-fieldset {
   border: 0;
@@ -2557,7 +2567,7 @@ summary:focus-visible {
 .readonly-fieldset + .readonly-fieldset,
 .readonly-fieldset + .card,
 .card + .readonly-fieldset {
-  margin-top: 16px;
+  margin-top: var(--space-4);
 }
 .readonly-fieldset:disabled .button,
 .readonly-fieldset:disabled button:not(.link-button):not([role='tab']) {
@@ -2568,7 +2578,7 @@ summary:focus-visible {
 .detail-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
-  gap: 20px;
+  gap: var(--space-6);
   align-items: start;
 }
 .detail-main,
@@ -2576,7 +2586,7 @@ summary:focus-visible {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 .detail-main > *,
 .detail-side > * {
@@ -2597,7 +2607,7 @@ summary:focus-visible {
 @media (min-width: 1100px) {
   .admin-layout {
     grid-template-columns: 250px minmax(0, 1fr);
-    gap: 24px;
+    gap: var(--space-6);
   }
 }
 .admin-nav {
@@ -2606,10 +2616,10 @@ summary:focus-visible {
 
 /* Integrations: set-up ones as cards, the rest in a compact list. */
 .integration-add {
-  margin-top: 16px;
+  margin-top: var(--space-4);
 }
 .integration-add h3 {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
   font-size: 16px;
 }
 .integration-add-list {
@@ -2618,17 +2628,17 @@ summary:focus-visible {
   padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 8px;
+  gap: var(--space-2);
 }
 .integration-add-item {
   display: grid;
   grid-template-columns: auto 1fr;
   grid-template-rows: auto auto;
-  column-gap: 10px;
+  column-gap: var(--space-3);
   align-items: center;
   width: 100%;
   min-height: var(--touch-target);
-  padding: 10px 12px;
+  padding: var(--space-3) var(--space-3);
   font: inherit;
   text-align: left;
   color: var(--ink);
@@ -2652,7 +2662,7 @@ summary:focus-visible {
 .scope-editor {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 .scope-summary {
@@ -2661,20 +2671,20 @@ summary:focus-visible {
 }
 .scope-form {
   flex-basis: 100%;
-  margin: 4px 0 0;
-  padding: 12px;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--ground);
 }
 .scope-form legend {
   font-weight: 600;
-  padding: 0 4px;
+  padding: 0 var(--space-1);
 }
 .scope-form .actions {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 /* Reviews: where each review is done, shown on its card. */
@@ -2682,13 +2692,15 @@ summary:focus-visible {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  margin: 8px 0;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0;
 }
 .where-control .segmented {
   margin-bottom: 0;
 }
 .where-label {
+  /* Same width for "Needed" and "Done", so the switches line up. */
+  min-width: 64px;
   font-weight: 600;
   color: var(--ink-secondary);
 }
@@ -2696,12 +2708,12 @@ summary:focus-visible {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .where-service select {
   min-height: var(--touch-target);
   max-width: 100%;
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
   font: inherit;
   color: var(--ink);
   background: var(--surface);
@@ -2709,9 +2721,60 @@ summary:focus-visible {
   border-radius: 8px;
 }
 .services-panel {
-  margin: 12px 0;
-  padding: 12px;
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--ground);
+}
+
+/* Calm, consistent rhythm: more room inside cards on wider screens, one gap between
+   stacked cards, and instant feedback on every press. */
+@media (min-width: 768px) {
+  .card {
+    padding: var(--space-6);
+  }
+}
+.card + .card,
+.card + section,
+section + .card {
+  margin-top: var(--space-4);
+}
+.button,
+.link-button,
+.segmented button,
+.chips button,
+.view-tile,
+.request-card {
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 60ms ease;
+}
+.button:active:not(:disabled),
+.segmented button:active,
+.chips button:active,
+.view-tile:active,
+.request-card:active {
+  transform: translateY(1px);
+}
+.segmented button:hover:not([aria-pressed='true']) {
+  background: var(--accent-tint);
+}
+[aria-busy='true'] {
+  cursor: progress;
+}
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .link-button,
+  .segmented button,
+  .chips button,
+  .view-tile,
+  .request-card {
+    transition: none;
+  }
+  .button:active:not(:disabled),
+  .segmented button:active,
+  .chips button:active,
+  .view-tile:active,
+  .request-card:active {
+    transform: none;
+  }
 }

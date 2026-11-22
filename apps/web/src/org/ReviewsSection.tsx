@@ -13,7 +13,7 @@ import {
   type StageSettings,
   type WorkflowSettings,
 } from '@app/shared';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
@@ -280,7 +280,7 @@ function NeedControl({ stage, settings, onChange }: { stage: string; settings: S
       </span>
       <div className="segmented" role="group" aria-labelledby={`${id}-label`}>
         {options.map((o) => (
-          <button key={o.value} type="button" aria-pressed={settings.requirement === o.value} disabled={busy} onClick={() => void pick(o.value)}>
+          <button key={o.value} type="button" aria-pressed={settings.requirement === o.value} aria-busy={busy} onClick={() => void pick(o.value)}>
             {o.label}
             <span className="visually-hidden"> ({stage})</span>
           </button>
@@ -340,10 +340,10 @@ function WhereControl({
         Done
       </span>
       <div className="segmented" role="group" aria-labelledby={`${id}-label`}>
-        <button type="button" aria-pressed={!external} disabled={busy} onClick={() => void apply({ ...settings, handledBy: 'here' })}>
+        <button type="button" aria-pressed={!external} aria-busy={busy} onClick={() => void apply({ ...settings, handledBy: 'here' })}>
           On this platform<span className="visually-hidden"> ({stage})</span>
         </button>
-        <button type="button" aria-pressed={external} disabled={busy} onClick={pickExternal}>
+        <button type="button" aria-pressed={external} aria-busy={busy} onClick={pickExternal}>
           In another service<span className="visually-hidden"> ({stage})</span>
         </button>
       </div>
@@ -465,17 +465,34 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
 
   const labelOf = (key: string) => questions.find((q) => q.key === key)?.label ?? key;
 
+  // The card shows a change at once; saves go out one after another in the background.
+  // A failed save brings back what the server has.
+  const latest = useRef<WorkflowSettings | null>(null);
+  latest.current = settings;
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
   async function saveStage(stage: string, next: StageSettings, keepOpen = false) {
-    if (!settings) return;
-    await saveWorkflowSettings(supabase, { ...settings, [stage]: next });
+    const before = latest.current;
+    if (!before) return;
+    const updated = { ...before, [stage]: next };
+    latest.current = updated;
+    setSettings(updated);
     if (!keepOpen) setOpen(null);
+    const saving = queue.current.then(() => saveWorkflowSettings(supabase, updated));
+    queue.current = saving.catch(() => undefined);
+    try {
+      await saving;
+    } catch (e) {
+      setNotice(null);
+      await reload();
+      throw e;
+    }
+    setIsCustom(true);
     const where = next.handledBy === 'external' ? ` It now runs in ${services?.find((sv) => sv.id === next.serviceId)?.name ?? 'another service'}.` : '';
     setNotice(
       next.requirement === 'never'
         ? `${stage} is off. Requests submitted from now on skip it; requests already sent keep their checks.`
         : `${stage} saved.${where} Requests submitted from now on follow it; requests already sent keep their checks.`,
     );
-    await reload();
   }
 
   return (

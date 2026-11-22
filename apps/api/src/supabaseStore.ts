@@ -3,6 +3,18 @@ import type { AdminStore, Caller, SavedFormInput } from './admin';
 import { InvitationRefused, type InvitationResult, type InvitationStore } from './invitations';
 import { NotADraftError, UnauthorizedError, type DraftRecord, type RequestStore, type SubmittedRecord, type Visibility } from './requests';
 
+/** The `sub` claim of a JWT, without verifying it; callers must verify the token separately. */
+function tokenSubject(token: string): string | null {
+  const part = token.split('.')[1];
+  if (!part) return null;
+  try {
+    const claims = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) as { sub?: unknown };
+    return typeof claims.sub === 'string' && /^[0-9a-f-]{36}$/i.test(claims.sub) ? claims.sub : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface SupabaseConfig {
   /** Project URL, for example https://abc.supabase.co */
   url: string;
@@ -176,17 +188,21 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
     },
 
     async getCaller(accessToken: string): Promise<Caller | null> {
-      const userRes = await fetchImpl(`${base}/auth/v1/user`, {
-        headers: { apikey: config.publishableKey, authorization: `Bearer ${accessToken}` },
-      });
+      // The user lookup and the membership read run in parallel: both verify the token.
+      // The membership filter uses the token's subject, which must match the verified user.
+      const sub = tokenSubject(accessToken);
+      if (!sub) throw new UnauthorizedError();
+      const userHeaders = { apikey: config.publishableKey, authorization: `Bearer ${accessToken}` };
+      const query = new URLSearchParams({ user_id: `eq.${sub}`, select: 'org_id,role', limit: '1' });
+      const [userRes, res] = await Promise.all([
+        fetchImpl(`${base}/auth/v1/user`, { headers: userHeaders }),
+        // Read with the caller's own token: RLS (and its MFA rule) applies.
+        fetchImpl(`${rest}/memberships?${query}`, { headers: userHeaders }),
+      ]);
       if (userRes.status === 401 || userRes.status === 403) throw new UnauthorizedError();
       if (!userRes.ok) throw new Error(`Supabase responded ${userRes.status} when reading the user`);
       const user = (await userRes.json()) as { id: string; email?: string };
-      // Read with the caller's own token: RLS (and its MFA rule) applies.
-      const query = new URLSearchParams({ user_id: `eq.${user.id}`, select: 'org_id,role', limit: '1' });
-      const res = await fetchImpl(`${rest}/memberships?${query}`, {
-        headers: { apikey: config.publishableKey, authorization: `Bearer ${accessToken}` },
-      });
+      if (user.id !== sub) throw new UnauthorizedError();
       if (res.status === 401 || res.status === 403) throw new UnauthorizedError();
       if (!res.ok) throw new Error(`Supabase responded ${res.status} when reading the membership`);
       const rows = (await res.json()) as { org_id: string; role: OrgRole }[];
