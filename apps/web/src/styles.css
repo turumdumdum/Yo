@@ -2414,3 +2414,51 @@ details.review-section[open] {
   gap: 8px;
   border-bottom: 1px solid var(--border);
 }
+
+/* Integrations: secrets, review services */
+.secret-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.secret-row input {
+  flex: 1 1 240px;
+}
+.secret-once {
+  border-left: 4px solid var(--status-waiting-fg);
+}
+.secret-once code {
+  overflow-wrap: anywhere;
+}
+.service-form {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--ground);
+}
+.service-form .choice span {
+  display: inline;
+}
+.connect-guide ol {
+  padding-left: 20px;
+  line-height: 1.6;
+}
+.connect-guide pre {
+  overflow-x: auto;
+  font-size: 13px;
+}
+.delivery-log {
+  margin-top: 8px;
+}
+.delivery-log summary {
+  cursor: pointer;
+  min-height: var(--touch-target);
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: var(--accent-dark);
+}
+.table-scroll {
+  overflow-x: auto;
+}

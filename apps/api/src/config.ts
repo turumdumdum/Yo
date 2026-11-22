@@ -7,6 +7,7 @@ import { supabaseRequestStore } from './supabaseStore';
 import { importEncryptionKey } from './crypto';
 import { queueExternalStages, runOutbox, type DispatcherDeps } from './dispatcher';
 import { supabaseIntegrationStore } from './integrationStore';
+import { envSettings, settingsResolver, type SmtpFactory } from './orgSettings';
 
 type Env = Record<string, string | undefined>;
 
@@ -14,7 +15,7 @@ type Env = Record<string, string | undefined>;
  * Builds the app options from environment values (process.env on Node, bindings on Workers).
  * Fails at start-up rather than on the first request when something is missing.
  */
-export function optionsFromEnv(env: Env): AppOptions & { outbox: DispatcherDeps } {
+export function optionsFromEnv(env: Env, platform: { smtpFactory?: SmtpFactory } = {}): AppOptions & { outbox: DispatcherDeps } {
   const required = (name: string): string => {
     const value = env[name];
     if (!value) throw new Error(`Missing environment variable ${name}. Set it in apps/api/.env (see apps/api/.env.example).`);
@@ -58,6 +59,9 @@ export function optionsFromEnv(env: Env): AppOptions & { outbox: DispatcherDeps 
   key.catch(() => undefined);
   const publicApiUrl = env.PUBLIC_API_URL || undefined;
   const outbox: DispatcherDeps = { store: integrationStore, key, webOrigin, publicApiUrl, log: (l) => console.info(l) };
+  // What an org admin saves in Admin → Integrations wins over the values above.
+  const settings = settingsResolver({ store: integrationStore, key, env: envSettings(env), smtpFactory: platform.smtpFactory });
+  const allowLocal = env.ALLOW_LOCAL_SERVICE_URLS === 'true';
 
   return {
     ai,
@@ -68,7 +72,11 @@ export function optionsFromEnv(env: Env): AppOptions & { outbox: DispatcherDeps 
       key,
       publicApiUrl,
       upguardBaseUrl: env.UPGUARD_BASE_URL || 'https://cyber-risk.upguard.com/api/public',
+      settings,
+      smtpSupported: !!platform.smtpFactory,
+      allowLocalServiceUrls: allowLocal,
     },
+    settings,
     afterSubmit: async (requestId, orgId) => {
       await queueExternalStages(outbox, requestId);
       await runOutbox(outbox, orgId);

@@ -44,7 +44,7 @@ const SECTIONS: { id: AdminSection; label: string; hint: string }[] = [
   { id: 'baseline', label: 'Security baseline', hint: 'Configuration every service must have' },
   { id: 'exceptions', label: 'Exceptions', hint: 'Accepted risks and their end dates' },
   { id: 'ai', label: 'AI check', hint: 'Instructions and questions for the AI' },
-  { id: 'integrations', label: 'Integrations', hint: 'Slack, UpGuard, external review' },
+  { id: 'integrations', label: 'Integrations', hint: 'Email, AI, Slack, UpGuard, review services' },
   { id: 'settings', label: 'Settings', hint: 'Review rules' },
 ];
 
@@ -260,7 +260,7 @@ export function Admin({ supabase, organization, userId, members, onChanged }: Pr
 
         {section === 'request-form' && <RequestFormsSection supabase={supabase} orgId={organization.id} />}
 
-        {section === 'review-forms' && <ReviewsSection supabase={supabase} orgId={organization.id} />}
+        {section === 'review-forms' && <ReviewsSection supabase={supabase} orgId={organization.id} onOpenIntegrations={() => setSection('integrations')} />}
 
         {section === 'baseline' && <SecurityBaselineSection supabase={supabase} orgId={organization.id} />}
 

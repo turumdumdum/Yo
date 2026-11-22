@@ -93,10 +93,12 @@ export interface StageRow {
   external?: boolean;
   external_id?: string | null;
   external_url?: string | null;
+  /** Id of the review service that handles an external stage. */
+  external_service?: string | null;
 }
 
 const STAGE_COLUMNS =
-  'id,request_id,position,name,status,note,reviewer_id,sla_due_at,sla_paused,checklist,decision_comment,conditions,decided_by,decided_at,review_fields,review_rules,external,external_id,external_url';
+  'id,request_id,position,name,status,note,reviewer_id,sla_due_at,sla_paused,checklist,decision_comment,conditions,decided_by,decided_at,review_fields,review_rules,external,external_id,external_url,external_service';
 
 /** Review answers by stage id. Empty for people who may not see them, such as the requester. */
 export async function requestReviewAnswers(supabase: SupabaseClient, requestId: string): Promise<Record<string, Answers>> {
@@ -627,11 +629,29 @@ export const SLACK_EVENTS = [
   { key: 'info_request.asked', label: 'A reviewer asks the requester a question' },
 ] as const;
 
+/** Where a setting comes from: saved in the app, the server's .env file, or nowhere. */
+export type SettingSource = 'settings' | 'env' | 'none';
+
+export interface ReviewServiceStatus {
+  id: string;
+  name: string;
+  url: string;
+  dataMode: 'push' | 'pull';
+  sendAllAnswers: boolean;
+  enabled: boolean;
+  hasSecret: boolean;
+  /** Review stages that use this service. */
+  usedBy: string[];
+}
+
 export interface IntegrationsStatus {
   encryptionReady: boolean;
+  server: { publicApiUrl: string; source: SettingSource };
+  email: { provider: 'off' | 'resend' | 'smtp' | 'log'; from: string; configured: boolean; source: SettingSource };
+  ai: { provider: 'off' | 'parallel'; processor: string; configured: boolean; source: SettingSource };
   slack: { enabled: boolean; configured: boolean; events: string[] };
   upguard: { enabled: boolean; configured: boolean };
-  external: { enabled: boolean; name: string; outboundUrl: string; configured: boolean; sendAllAnswers: boolean };
+  reviewServices: ReviewServiceStatus[];
 }
 
 export async function loadIntegrations(supabase: SupabaseClient): Promise<IntegrationsStatus> {
@@ -655,13 +675,80 @@ export async function saveUpguard(supabase: SupabaseClient, body: { enabled: boo
   if (!res.ok) throw await apiError(res, 'The UpGuard settings could not be saved.');
 }
 
-export async function saveExternal(
-  supabase: SupabaseClient,
-  body: { enabled: boolean; name: string; outboundUrl: string; sendAllAnswers: boolean; rotateSecret?: boolean },
-): Promise<{ secret?: string }> {
-  const res = await callApi(supabase, '/v1/integrations/external', 'PUT', 30_000, body);
-  if (!res.ok) throw await apiError(res, 'The external review settings could not be saved.');
-  return (await res.json().catch(() => ({}))) as { secret?: string };
+async function sendJson<T = unknown>(supabase: SupabaseClient, path: string, method: 'POST' | 'PUT' | 'DELETE', body: unknown, fallback: string): Promise<T> {
+  const res = await callApi(supabase, path, method, 30_000, method === 'DELETE' ? undefined : body);
+  if (!res.ok) throw await apiError(res, fallback);
+  return (await res.json().catch(() => ({}))) as T;
+}
+
+export const saveServerSettings = (supabase: SupabaseClient, body: { publicApiUrl: string }) =>
+  sendJson(supabase, '/v1/integrations/server', 'PUT', body, 'The server address could not be saved.');
+
+export const saveEmailSettings = (supabase: SupabaseClient, body: { provider: string; from: string; resendApiKey?: string; smtpUrl?: string }) =>
+  sendJson(supabase, '/v1/integrations/email', 'PUT', body, 'The email settings could not be saved.');
+
+export const testEmail = (supabase: SupabaseClient) => sendJson(supabase, '/v1/integrations/email/test', 'POST', {}, 'The test email could not be sent.');
+
+export const saveAiProvider = (supabase: SupabaseClient, body: { provider: string; processor?: string; apiKey?: string }) =>
+  sendJson(supabase, '/v1/integrations/ai', 'PUT', body, 'The AI settings could not be saved.');
+
+export interface ReviewServiceInput {
+  name: string;
+  url: string;
+  dataMode: 'push' | 'pull';
+  sendAllAnswers: boolean;
+  enabled: boolean;
+}
+
+export const createReviewService = (supabase: SupabaseClient, body: ReviewServiceInput) =>
+  sendJson<{ service: ReviewServiceStatus; secret: string }>(supabase, '/v1/integrations/review-services', 'POST', body, 'The service could not be added.');
+
+export const updateReviewService = (supabase: SupabaseClient, id: string, body: ReviewServiceInput) =>
+  sendJson(supabase, `/v1/integrations/review-services/${encodeURIComponent(id)}`, 'PUT', body, 'The service could not be saved.');
+
+export const rotateReviewServiceSecret = (supabase: SupabaseClient, id: string) =>
+  sendJson<{ secret: string }>(supabase, `/v1/integrations/review-services/${encodeURIComponent(id)}/rotate-secret`, 'POST', {}, 'A new secret could not be created.');
+
+export const deleteReviewService = (supabase: SupabaseClient, id: string) =>
+  sendJson(supabase, `/v1/integrations/review-services/${encodeURIComponent(id)}`, 'DELETE', null, 'The service could not be deleted.');
+
+export const testReviewService = (supabase: SupabaseClient, id: string) =>
+  sendJson<{ ok: boolean; status?: number; ms?: number; error?: string }>(
+    supabase,
+    `/v1/integrations/review-services/${encodeURIComponent(id)}/test`,
+    'POST',
+    {},
+    'The connection test could not run.',
+  );
+
+export interface Delivery {
+  id: number;
+  type: string;
+  created_at: string;
+  attempts: number;
+  delivered_at: string | null;
+  failed_at: string | null;
+  last_error: string | null;
+  next_attempt_at: string | null;
+}
+
+export async function listDeliveries(supabase: SupabaseClient, id: string): Promise<Delivery[]> {
+  const res = await callApi(supabase, `/v1/integrations/review-services/${encodeURIComponent(id)}/deliveries`, 'GET');
+  if (!res.ok) throw await apiError(res, 'The delivery log could not be loaded.');
+  return (await res.json()) as Delivery[];
+}
+
+/** Names of the organization's review services, for any member. */
+export async function listReviewServiceNames(supabase: SupabaseClient): Promise<{ id: string; name: string }[]> {
+  const res = await callApi(supabase, '/v1/review-services', 'GET');
+  if (!res.ok) throw await apiError(res, 'The review services could not be loaded.');
+  return (await res.json()) as { id: string; name: string }[];
+}
+
+/** Address of the machine-readable format (OpenAPI) of the review service connection. */
+export function externalSpecUrl(): string | null {
+  const base = import.meta.env.VITE_API_URL as string | undefined;
+  return base ? `${base.replace(/\/+$/, '')}/v1/external/spec` : null;
 }
 
 export interface VendorRiskCheck {

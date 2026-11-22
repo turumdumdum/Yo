@@ -71,6 +71,7 @@ export function jsonOnly(): MiddlewareHandler {
 export function noStore(): MiddlewareHandler {
   return async (c, next) => {
     await next();
-    c.header('Cache-Control', 'no-store');
+    // A route may opt in to public caching (only the public exchange spec does).
+    if (!c.res.headers.get('Cache-Control')?.startsWith('public')) c.header('Cache-Control', 'no-store');
   };
 }

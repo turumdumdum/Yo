@@ -75,13 +75,16 @@ Off by default and never required. With your own API key: suggestions for vendor
 
 ### Integrations
 
+Everything is set up in **Admin → Integrations**: the server address, email, AI, Slack, UpGuard and review services. Keys and webhook addresses are entered there once, stored encrypted, and never shown again (write-only). The server's environment file only holds what the API needs to start: the Supabase connection, the web address, and the encryption key, which the Node API creates by itself on first start.
+
 | Integration | What it does | Notes |
 | --- | --- | --- |
-| Email | Sends invitations | Resend, any SMTP server, or a log for testing |
+| Email | Sends invitations | Resend, any SMTP server, or a log for testing; set in the UI |
+| AI | Optional vendor lookup and answer check | Your own provider key, set in the UI; off by default |
 | Slack | Posts notifications to a channel (submitted, decided, exceptions, …) | Incoming webhook; confidential requests are not named |
 | UpGuard | Shows the vendor's external security rating on the request | The API endpoint and fields were written without access to UpGuard's documentation and **must be verified** before use |
 | VirusTotal | A link to the vendor's domain report | No key needed; opens virustotal.com |
-| External review service | Runs a check (for example the security review) in another tool; this app sends the data and receives the status | Signed JSON both ways; see [external-review.md](external-review.md) |
+| Review services | Each review can run in its own external service (for example `review.testx.com`). This app sends the review there and shows the status it reports back | One connection per service, each with its own signing secret, Test connection and a delivery log. The service either gets the data in the event (push) or reads it from our API and keeps its own database (pull). See [external-review.md](external-review.md) |
 
 ---
 

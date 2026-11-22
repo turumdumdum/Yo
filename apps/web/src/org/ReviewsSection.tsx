@@ -23,8 +23,10 @@ import {
   loadWorkflowSettings,
   resetWorkflowSettings,
   saveWorkflowSettings,
+  listReviewServiceNames,
 } from '../requests/api';
 import { ReviewFormEditor } from './ReviewFormEditor';
+import { ConnectGuideLink } from './ReviewServicesCard';
 
 // One card per review: when it is needed, how long the reviewer has, what they confirm,
 // and the form they fill in. Changes apply to requests submitted afterwards.
@@ -38,12 +40,16 @@ function StageSettingsEditor({
   stage,
   initial,
   questions,
+  services,
+  onOpenIntegrations,
   onSave,
   onCancel,
 }: {
   stage: string;
   initial: StageSettings;
   questions: OneChoice[];
+  services: { id: string; name: string }[] | null;
+  onOpenIntegrations?: () => void;
   onSave: (next: StageSettings) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -55,6 +61,10 @@ function StageSettingsEditor({
   const condition = s.onlyWhen ? questions.find((q) => q.key === s.onlyWhen!.field) : undefined;
 
   async function save() {
+    if (s.handledBy === 'external' && !(services ?? []).some((sv) => sv.id === s.serviceId)) {
+      setError('Choose a connected review service, or let the review happen here.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -155,12 +165,44 @@ function StageSettingsEditor({
             Here: reviewers use the checklist and review form in this app
           </label>
           <label className="choice">
-            <input type="radio" name={`${id}-where`} checked={s.handledBy === 'external'} onChange={() => setS({ ...s, handledBy: 'external' })} />
-            In an external service: this app sends the request data and shows the status it reports back
+            <input
+              type="radio"
+              name={`${id}-where`}
+              checked={s.handledBy === 'external'}
+              onChange={() => setS({ ...s, handledBy: 'external', serviceId: s.serviceId ?? services?.[0]?.id ?? null })}
+            />
+            In an external service: this app sends the review there and shows the status it reports back
           </label>
         </div>
         {s.handledBy === 'external' && (
-          <p className="field-hint">Needs the external review service in Admin → Integrations. The checklist and review form below are not used then.</p>
+          <div className="field nested">
+            {services === null ? (
+              <p role="status">Loading the services…</p>
+            ) : services.length === 0 ? (
+              <p className="notice">
+                No review service is connected yet. Add one in Admin → Integrations → Review services, then come back.{' '}
+                {onOpenIntegrations && (
+                  <button type="button" className="link-button" onClick={onOpenIntegrations}>
+                    Open Integrations
+                  </button>
+                )}
+              </p>
+            ) : (
+              <>
+                <label htmlFor={`${id}-service`}>Review service</label>
+                <select id={`${id}-service`} value={s.serviceId ?? ''} onChange={(e) => setS({ ...s, serviceId: e.target.value || null })}>
+                  {!services.some((sv) => sv.id === s.serviceId) && <option value={s.serviceId ?? ''}>{s.serviceId ? `${s.serviceId} (not connected)` : 'Choose a service'}</option>}
+                  {services.map((sv) => (
+                    <option key={sv.id} value={sv.id}>
+                      {sv.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+            <p className="field-hint">The checklist and review form below are not used for an external review.</p>
+            <ConnectGuideLink />
+          </div>
         )}
       </fieldset>
 
@@ -209,7 +251,11 @@ function StageSettingsEditor({
   );
 }
 
-export function ReviewsSection({ supabase, orgId }: { supabase: SupabaseClient; orgId: string }) {
+export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supabase: SupabaseClient; orgId: string; onOpenIntegrations?: () => void }) {
+  const [services, setServices] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => {
+    listReviewServiceNames(supabase).then(setServices, () => setServices([]));
+  }, [supabase]);
   const [settings, setSettings] = useState<WorkflowSettings | null>(null);
   const [isCustom, setIsCustom] = useState(false);
   const [customForms, setCustomForms] = useState<string[]>([]);
@@ -274,7 +320,7 @@ export function ReviewsSection({ supabase, orgId }: { supabase: SupabaseClient; 
                   <span className="badges">
                     {s.handledBy === 'external' && s.requirement !== 'never' && (
                       <span className="status-badge" data-tone="waiting">
-                        External service
+                        {services?.find((sv) => sv.id === s.serviceId)?.name ?? 'External service'}
                       </span>
                     )}
                     <span className="status-badge" data-tone={TONE[s.requirement]}>
@@ -309,7 +355,15 @@ export function ReviewsSection({ supabase, orgId }: { supabase: SupabaseClient; 
                   </button>
                 </div>
                 {isOpen && open.panel === 'settings' && (
-                  <StageSettingsEditor stage={stage} initial={s} questions={questions} onSave={(next) => saveStage(stage, next)} onCancel={() => setOpen(null)} />
+                  <StageSettingsEditor
+                    stage={stage}
+                    initial={s}
+                    questions={questions}
+                    services={services}
+                    onOpenIntegrations={onOpenIntegrations}
+                    onSave={(next) => saveStage(stage, next)}
+                    onCancel={() => setOpen(null)}
+                  />
                 )}
                 {isOpen && open.panel === 'form' && <ReviewFormEditor supabase={supabase} orgId={orgId} stage={stage} onSaved={() => void reload()} />}
               </li>

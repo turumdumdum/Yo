@@ -37,11 +37,20 @@ export interface InvitationOutcome {
 const MAX_ROWS = 500;
 const SEND_CONCURRENCY = 4;
 
-export function invitationRoutes(store: InvitationStore, options: { webOrigin: string; mailer?: Mailer }) {
+export function invitationRoutes(
+  store: InvitationStore,
+  options: { webOrigin: string; mailer?: Mailer; /** The organization's own mailer (Admin → Integrations), else the environment's. */ mailerFor?: (orgId: string) => Promise<Mailer | undefined> },
+) {
   const routes = new Hono();
   const base = options.webOrigin.replace(/\/+$/, '');
+  const mailerFor = async (orgId: string) => (options.mailerFor ? options.mailerFor(orgId) : options.mailer);
 
-  routes.get('/invitations/email-status', (c) => c.json({ enabled: Boolean(options.mailer) }));
+  routes.get('/invitations/email-status', async (c) => {
+    if (!options.mailerFor) return c.json({ enabled: Boolean(options.mailer) });
+    const token = c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1];
+    const caller = token ? await store.getCaller(token).catch(() => null) : null;
+    return c.json({ enabled: caller ? Boolean(await mailerFor(caller.orgId)) : false });
+  });
 
   routes.post('/invitations', async (c) => {
     const token = c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1];
@@ -78,13 +87,14 @@ export function invitationRoutes(store: InvitationStore, options: { webOrigin: s
       throw error;
     }
 
-    const orgName = options.mailer ? await store.organizationName(caller.orgId) : '';
+    const orgMailer = await mailerFor(caller.orgId);
+    const orgName = orgMailer ? await store.organizationName(caller.orgId) : '';
     const outcomes: InvitationOutcome[] = results.map((r) =>
       r.token ? { email: r.email, role: r.role, link: `${base}/?invite=${r.token}`, emailed: false } : { email: r.email, role: r.role, emailed: false, error: r.error ?? 'Not invited' },
     );
 
-    if (options.mailer) {
-      const mailer = options.mailer;
+    if (orgMailer) {
+      const mailer = orgMailer;
       const queue = outcomes.filter((o) => o.link);
       const worker = async () => {
         for (let next = queue.shift(); next; next = queue.shift()) {
@@ -99,7 +109,7 @@ export function invitationRoutes(store: InvitationStore, options: { webOrigin: s
       };
       await Promise.all(Array.from({ length: SEND_CONCURRENCY }, worker));
     } else {
-      for (const o of outcomes) if (o.link) o.emailError = 'Email is not set up on this server';
+      for (const o of outcomes) if (o.link) o.emailError = 'Email is not set up. An admin can set it up in Admin → Integrations.';
     }
 
     // The link is only returned when the person did not get it by email.

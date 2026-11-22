@@ -1,6 +1,9 @@
-import { allFields, focusFieldsForStage, parseRequestForm, DEFAULT_REQUEST_FORM, type ExternalStageStarted, type RequestFormDefinition } from '@app/shared';
-import { decrypt, signatureHeader, type EncryptionKey } from './crypto';
+import { allFields, focusFieldsForStage, parseRequestForm, DEFAULT_REQUEST_FORM, type ExternalStageStarted, type RequestFormDefinition, type ReviewService } from '@app/shared';
+import { signatureHeader, type EncryptionKey } from './crypto';
 import type { AuditRow, IntegrationConfig, IntegrationSecrets, IntegrationStore, OutboundRow, RequestInfo, StageInfo } from './integrationStore';
+import { readSecrets, reviewServicesOf } from './orgSettings';
+
+export { readSecrets };
 
 // The outbox: notifications and calls to other services go through outbound_events, so a
 // failure is retried instead of lost, and a slow service never delays a user.
@@ -22,11 +25,6 @@ export interface DispatcherDeps {
 /** Delay before the next attempt: 30 s, 1 min, 2 min, … at most 6 hours. */
 export function backoffMs(attempts: number): number {
   return Math.min(30_000 * 2 ** Math.max(0, attempts - 1), 6 * 3_600_000);
-}
-
-export async function readSecrets(key: EncryptionKey | null, encrypted: string | null): Promise<IntegrationSecrets> {
-  if (!key || !encrypted) return {};
-  return JSON.parse(await decrypt(key, encrypted)) as IntegrationSecrets;
 }
 
 const escapeSlack = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -125,19 +123,24 @@ export async function deliverDue(deps: DispatcherDeps, limit = 50): Promise<numb
         }
         res = await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: row.payload.text }), signal: AbortSignal.timeout(10_000) });
       } else {
-        const ext = integration?.config.external;
-        const secret = integration?.secrets.externalSecret;
-        if (!ext?.enabled || !secret) {
-          await fail('The external review service is off or not configured', true);
+        // Each external event goes to the review service of its stage.
+        const serviceId = serviceIdOf(row.payload);
+        const { services, serviceSecrets } = integration ? reviewServicesOf(integration.config, integration.secrets) : { services: [], serviceSecrets: {} as Record<string, string> };
+        const service = services.find((s) => s.id === serviceId);
+        const secret = serviceSecrets[serviceId];
+        if (!service) {
+          await fail(`Review service "${serviceId}" does not exist. Add it in Admin → Integrations, or pick another service for the review.`, true);
           continue;
         }
-        const body = JSON.stringify(row.payload);
-        res = await fetchImpl(ext.outboundUrl, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-signature': await signatureHeader(secret, body, now().getTime()), 'x-event-id': String(row.payload.event_id ?? row.id) },
-          body,
-          signal: AbortSignal.timeout(15_000),
-        });
+        if (!service.enabled) {
+          await fail(`Review service "${service.name}" is turned off`, true);
+          continue;
+        }
+        if (!secret) {
+          await fail(`Review service "${service.name}" has no signing secret`, true);
+          continue;
+        }
+        res = await sendSigned(fetchImpl, service, secret, row.payload, now().getTime(), 15_000);
       }
       if (res.ok) {
         await store.markDelivered(row.id);
@@ -153,6 +156,29 @@ export async function deliverDue(deps: DispatcherDeps, limit = 50): Promise<numb
   }
   if (delivered > 0) deps.log?.(`Outbox: delivered ${delivered} event(s)`);
   return delivered;
+}
+
+/** The service an external event belongs to; events queued before services existed go to "default". */
+export function serviceIdOf(payload: Record<string, unknown>): string {
+  const service = payload.service as { id?: unknown } | undefined;
+  return typeof service?.id === 'string' ? service.id : 'default';
+}
+
+/** POSTs a signed JSON event to a review service. */
+export async function sendSigned(fetchImpl: typeof fetch, service: Pick<ReviewService, 'id' | 'url'>, secret: string, payload: Record<string, unknown>, nowMs: number, timeoutMs: number): Promise<Response> {
+  const body = JSON.stringify(payload);
+  return fetchImpl(service.url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-signature': await signatureHeader(secret, body, nowMs),
+      'x-service-id': service.id,
+      'x-event-id': String(payload.event_id ?? ''),
+    },
+    body,
+    redirect: 'manual',
+    signal: AbortSignal.timeout(timeoutMs),
+  });
 }
 
 /** One pass: queue new notifications, then deliver what is due. Errors are logged, never thrown. */
@@ -187,7 +213,6 @@ export function stageStartedPayload(
     if (value !== undefined && value !== null && value !== '') answers[f.key] = { label: f.label, value };
   }
   const text = (key: string) => (typeof request.answers[key] === 'string' ? (request.answers[key] as string) : null);
-  const base = options.publicApiUrl?.replace(/\/+$/, '');
   return {
     type: 'stage.started',
     event_id: options.eventId ?? `stage.started:${stage.id}`,
@@ -208,14 +233,50 @@ export function stageStartedPayload(
       config_requirements: request.config_requirements ?? [],
     },
     stage: { id: stage.id, name: stage.name, due_at: stage.sla_due_at },
-    callback: {
-      status_url: base ? `${base}/v1/external/stages/${stage.id}/status` : null,
-      stage_url: base ? `${base}/v1/external/stages/${stage.id}?org_id=${request.org_id}` : null,
-    },
+    callback: callbacks(stage, request.org_id, options.publicApiUrl),
   };
 }
 
-/** After submission: queue a "stage.started" event for every external stage of the request. */
+/** The callback links an external service uses for a stage. */
+function callbacks(stage: Pick<StageInfo, 'id'>, orgId: string, publicApiUrl?: string) {
+  const base = publicApiUrl?.replace(/\/+$/, '');
+  return {
+    status_url: base ? `${base}/v1/external/stages/${stage.id}/status` : null,
+    stage_url: base ? `${base}/v1/external/stages/${stage.id}?org_id=${orgId}` : null,
+  };
+}
+
+/** pull mode: only ids and links; the service reads the data from our API (GET stage_url). */
+export function pullPayload(request: Pick<RequestInfo, 'id' | 'org_id' | 'is_confidential'>, stage: StageInfo, serviceId: string, options: { publicApiUrl?: string; now?: Date }) {
+  return {
+    type: 'stage.started',
+    event_id: `stage.started:${stage.id}`,
+    created_at: (options.now ?? new Date()).toISOString(),
+    data_mode: 'pull',
+    service: { id: serviceId },
+    organization: { id: request.org_id },
+    request: { id: request.id, confidential: request.is_confidential },
+    stage: { id: stage.id, name: stage.name, due_at: stage.sla_due_at },
+    callback: callbacks(stage, request.org_id, options.publicApiUrl),
+  };
+}
+
+/** The event for one external stage, in the data mode of its service. */
+export function stageEvent(request: RequestInfo, stage: StageInfo, service: ReviewService | undefined, serviceId: string, publicApiUrl?: string): Record<string, unknown> {
+  if (service?.dataMode === 'pull') return pullPayload(request, stage, serviceId, { publicApiUrl });
+  return { ...stageStartedPayload(request, stage, { sendAllAnswers: !!service?.sendAllAnswers, publicApiUrl }), data_mode: 'push', service: { id: serviceId } };
+}
+
+/** The public API address of an organization: its saved setting, else the server's. */
+export function publicApiUrlOf(config: IntegrationConfig | undefined, fallback?: string): string | undefined {
+  return config?.server?.publicApiUrl || fallback;
+}
+
+/**
+ * After submission: queue a "stage.started" event for every external stage of the request,
+ * each for its own review service. A missing or disabled service is still queued, so the
+ * failure shows up in that service's delivery log.
+ */
 export async function queueExternalStages(deps: DispatcherDeps, requestId: string): Promise<number> {
   const { store } = deps;
   const stages = (await store.externalStages(requestId)).filter((s) => s.status === 'In review');
@@ -223,12 +284,16 @@ export async function queueExternalStages(deps: DispatcherDeps, requestId: strin
   const [request] = await store.requests([requestId]);
   if (!request) return 0;
   const integration = await store.getIntegration(request.org_id);
-  const ext = integration?.config.external;
-  if (!ext?.enabled) return 0;
+  const config = integration?.config ?? {};
+  const { services } = reviewServicesOf(config, {});
+  const publicApiUrl = publicApiUrlOf(config, deps.publicApiUrl);
   await store.enqueue(
     request.org_id,
     'external',
-    stages.map((s) => stageStartedPayload(request, s, { sendAllAnswers: ext.sendAllAnswers, publicApiUrl: deps.publicApiUrl }) as unknown as Record<string, unknown>),
+    stages.map((s) => {
+      const serviceId = s.external_service ?? 'default';
+      return stageEvent(request, s, services.find((x) => x.id === serviceId), serviceId, publicApiUrl);
+    }),
   );
   return stages.length;
 }

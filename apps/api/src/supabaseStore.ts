@@ -358,6 +358,7 @@ export function supabaseRequestStore(config: SupabaseConfig, fetchImpl: typeof f
             review_fields: stage.reviewFields,
             review_rules: stage.reviewRules,
             external: stage.external,
+            external_service: stage.externalService,
           })),
         }),
       });

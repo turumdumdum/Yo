@@ -1,9 +1,11 @@
+import { defaultWorkflowSettings, type WorkflowSettings } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app';
 import type { Caller } from './admin';
 import { decrypt, encrypt, importEncryptionKey, signatureHeader, verifySignature, type EncryptionKey } from './crypto';
-import { backoffMs, deliverDue, flushNotifications, MAX_ATTEMPTS, queueExternalStages, slackText, stageStartedPayload, type DispatcherDeps } from './dispatcher';
+import { backoffMs, deliverDue, pullPayload, flushNotifications, MAX_ATTEMPTS, queueExternalStages, slackText, stageStartedPayload, type DispatcherDeps } from './dispatcher';
 import type { AuditRow, IntegrationRecord, IntegrationStore, OutboundRow, RequestInfo, StageInfo } from './integrationStore';
+import { envSettings, settingsResolver } from './orgSettings';
 import type { DraftRecord, RequestStore } from './requests';
 import { hostnameOf, parseUpGuardVendor } from './upguard';
 
@@ -11,7 +13,7 @@ const ORG = '11111111-1111-4111-8111-111111111111';
 const REQ = '22222222-2222-4222-8222-222222222222';
 const STAGE = '33333333-3333-4333-8333-333333333333';
 const KEY_B64 = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
-const admin: Caller = { userId: 'u1', orgId: ORG, role: 'org_admin' };
+const admin: Caller = { userId: 'u1', orgId: ORG, role: 'org_admin', email: 'admin@acme.example' };
 
 function memoryStore() {
   const s = {
@@ -38,7 +40,8 @@ function memoryStore() {
       form: null,
       config_requirements: [{ id: 'sso' }],
     } as RequestInfo,
-    stage: { id: STAGE, org_id: ORG, request_id: REQ, name: 'Security review', status: 'In review', sla_due_at: '2026-11-27T10:00:00.000Z', external: true } as StageInfo,
+    stage: { id: STAGE, org_id: ORG, request_id: REQ, name: 'Security review', status: 'In review', sla_due_at: '2026-11-27T10:00:00.000Z', external: true, external_service: null } as StageInfo,
+    workflow: null as WorkflowSettings | null,
   };
   let id = 0;
   const store: IntegrationStore = {
@@ -101,6 +104,22 @@ function memoryStore() {
     async externalStages() {
       return [s.stage];
     },
+    async deliveries(org, serviceId, limit) {
+      return s.queue
+        .filter((q) => q.org_id === org && q.kind === 'external' && ((q.payload.service as { id?: string } | undefined)?.id ?? 'default') === serviceId)
+        .slice(-limit)
+        .reverse()
+        .map((q) => ({
+          id: q.id,
+          type: (q.payload.type as string) ?? null,
+          created_at: 'now',
+          attempts: q.attempts,
+          delivered_at: q.delivered ? 'now' : null,
+          failed_at: q.failed ? 'now' : null,
+          last_error: q.error ?? null,
+          next_attempt_at: q.next?.toISOString() ?? 'now',
+        }));
+    },
     async saveVendorRisk(row) {
       s.risks.push(row);
       return { id: 'r1', request_id: row.request_id, source: 'upguard', hostname: row.hostname, data: row.data, fetched_at: 'now' };
@@ -109,7 +128,17 @@ function memoryStore() {
   return { s, store };
 }
 
-function setup(options: { caller?: Caller | null; withKey?: boolean; fetchImpl?: typeof fetch; rateLimits?: { prefix: string; limit: number; windowMs: number }[] } = {}) {
+function setup(
+  options: {
+    caller?: Caller | null;
+    withKey?: boolean;
+    fetchImpl?: typeof fetch;
+    rateLimits?: { prefix: string; limit: number; windowMs: number }[];
+    env?: Record<string, string>;
+    smtp?: boolean;
+    allowLocal?: boolean;
+  } = {},
+) {
   const { s, store } = memoryStore();
   const key: Promise<EncryptionKey | null> = options.withKey === false ? Promise.resolve(null) : importEncryptionKey(KEY_B64);
   const draft: DraftRecord = { id: REQ, org_id: ORG, status: 'in_review', answers: s.request.answers };
@@ -120,17 +149,42 @@ function setup(options: { caller?: Caller | null; withKey?: boolean; fetchImpl?:
     async getReviewTemplates() {
       return {};
     },
+    async getWorkflowSettings() {
+      return s.workflow;
+    },
     async submit() {
       throw new Error('unused');
     },
   };
+  const mails: { to: string; subject: string; via: string }[] = [];
+  const settings = settingsResolver({
+    store,
+    key,
+    env: envSettings(options.env ?? {}),
+    fetchImpl: options.fetchImpl,
+    smtpFactory: options.smtp ? (url) => ({ send: async (m) => void mails.push({ to: m.to, subject: m.subject, via: `smtp:${url}` }) }) : undefined,
+  });
+  const getCaller = async () => (options.caller === undefined ? admin : options.caller);
   const app = createApp({
     webOrigin: 'https://app.example',
     requests,
-    admin: {
-      getCaller: async () => (options.caller === undefined ? admin : options.caller),
+    admin: { getCaller } as never,
+    invitations: {
+      getCaller,
+      createInvitations: async (_t: string, _o: string, rows: { email: string; role: string }[]) => rows.map((r) => ({ ...r, token: 'tok' })),
+      organizationName: async () => 'Acme',
     } as never,
-    integrations: { store, key, publicApiUrl: 'https://api.example', upguardBaseUrl: 'https://upguard.example/api', fetchImpl: options.fetchImpl },
+    integrations: {
+      store,
+      key,
+      publicApiUrl: 'https://api.example',
+      upguardBaseUrl: 'https://upguard.example/api',
+      fetchImpl: options.fetchImpl,
+      settings,
+      smtpSupported: !!options.smtp,
+      allowLocalServiceUrls: !!options.allowLocal,
+    },
+    settings,
     rateLimits: options.rateLimits,
   });
   const call = (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) =>
@@ -140,7 +194,24 @@ function setup(options: { caller?: Caller | null; withKey?: boolean; fetchImpl?:
       body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
     });
   const deps: DispatcherDeps = { store, key, webOrigin: 'https://app.example', publicApiUrl: 'https://api.example', fetchImpl: options.fetchImpl };
-  return { s, store, app, call, key, deps };
+  return { s, store, app, call, key, deps, mails, settings };
+}
+
+const SERVICE = { name: 'SecTool', url: 'https://sec.example/hook', dataMode: 'push', sendAllAnswers: false, enabled: true };
+
+/** Adds a review service and returns its id and one-time secret. */
+async function addService(call: ReturnType<typeof setup>['call'], body: Record<string, unknown> = {}) {
+  const res = await call('POST', '/v1/integrations/review-services', { ...SERVICE, ...body });
+  expect(res.status).toBe(201);
+  const json = (await res.json()) as { service: { id: string }; secret: string };
+  return { id: json.service.id, secret: json.secret };
+}
+
+/** Workflow settings with Security review handled by the given service. */
+function workflowUsing(serviceId: string): WorkflowSettings {
+  const w = defaultWorkflowSettings();
+  w['Security review'] = { ...w['Security review']!, handledBy: 'external', serviceId };
+  return w;
 }
 
 describe('crypto', () => {
@@ -182,15 +253,22 @@ describe('integration settings', () => {
     expect(JSON.parse(view)).toMatchObject({ encryptionReady: true, slack: { enabled: true, configured: true, events: ['request.submitted'] } });
   });
 
-  it('hand out the external signing secret once, and again only when rotated', async () => {
-    const { call } = setup();
-    const body = { enabled: true, name: 'SecTool', outboundUrl: 'https://sec.example/hook', sendAllAnswers: false };
-    expect((await call('PUT', '/v1/integrations/external', { ...body, outboundUrl: 'http://sec.example' })).status).toBe(422);
-    const first = (await (await call('PUT', '/v1/integrations/external', body)).json()) as { secret?: string };
-    expect(first.secret).toMatch(/^[0-9a-f]{64}$/);
-    expect(((await (await call('PUT', '/v1/integrations/external', body)).json()) as { secret?: string }).secret).toBeUndefined();
-    const rotated = (await (await call('PUT', '/v1/integrations/external', { ...body, rotateSecret: true })).json()) as { secret?: string };
-    expect(rotated.secret).not.toBe(first.secret);
+  it('hand out a review service secret once, and again only when rotated', async () => {
+    const { call, s } = setup();
+    expect((await call('POST', '/v1/integrations/review-services', { ...SERVICE, url: 'ftp://sec.example' })).status).toBe(422);
+    const { id, secret } = await addService(call);
+    expect(id).toBe('sectool');
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const view = await (await call('GET', '/v1/integrations')).text();
+    expect(view).not.toContain(secret);
+    expect(JSON.parse(view).reviewServices).toEqual([{ id, ...SERVICE, hasSecret: true, usedBy: [] }]);
+    expect(JSON.stringify(s.saved)).not.toContain(secret);
+    const rotated = (await (await call('POST', `/v1/integrations/review-services/${id}/rotate-secret`)).json()) as { secret: string };
+    expect(rotated.secret).not.toBe(secret);
+    expect(s.saved.at(-1)).toEqual({ action: 'integration.review_service_secret_rotated', metadata: { id } });
+    expect((await call('POST', '/v1/integrations/review-services/nope/rotate-secret')).status).toBe(404);
+    // A second service with the same name gets its own id.
+    expect((await addService(call)).id).toBe('sectool-2');
   });
 
   it('are for org admins, and need the encryption key', async () => {
@@ -258,11 +336,14 @@ describe('outbox', () => {
       return new Response('', { status: 202 });
     }) as unknown as typeof fetch;
     const { s, deps, call } = setup({ fetchImpl });
-    const { secret } = (await (await call('PUT', '/v1/integrations/external', { enabled: true, name: 'SecTool', outboundUrl: 'https://sec.example/hook', sendAllAnswers: false })).json()) as { secret: string };
+    const { id, secret } = await addService(call);
+    s.stage.external_service = id;
     expect(await queueExternalStages(deps, REQ)).toBe(1);
-    const payload = s.queue[0]!.payload as unknown as ReturnType<typeof stageStartedPayload>;
+    const payload = s.queue[0]!.payload as unknown as ReturnType<typeof stageStartedPayload> & { data_mode: string; service: { id: string } };
     expect(payload).toMatchObject({
       type: 'stage.started',
+      data_mode: 'push',
+      service: { id },
       organization: { id: ORG },
       request: { id: REQ, title: 'Acme Board', vendor: 'Acme', website: 'https://www.acme.example/x', risk_tier: 'High', confidential: false, config_requirements: [{ id: 'sso' }] },
       stage: { id: STAGE, name: 'Security review' },
@@ -276,20 +357,62 @@ describe('outbox', () => {
     await deliverDue(deps);
     const req = sent[0]!;
     expect(req.url).toBe('https://sec.example/hook');
-    const header = (req.init.headers as Record<string, string>)['x-signature'];
-    expect(await verifySignature(secret, header, req.init.body as string)).toBe('ok');
+    const headers = req.init.headers as Record<string, string>;
+    expect(headers['x-service-id']).toBe(id);
+    expect(headers['x-event-id']).toBe(payload.event_id);
+    expect(await verifySignature(secret, headers['x-signature'], req.init.body as string)).toBe('ok');
+    expect(req.init.redirect).toBe('manual');
+  });
+
+  it('sends no answers in pull mode', async () => {
+    const sent: RequestInit[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      sent.push(init);
+      return new Response('', { status: 200 });
+    }) as unknown as typeof fetch;
+    const { s, deps, call } = setup({ fetchImpl });
+    const { id } = await addService(call, { name: 'Pull tool', dataMode: 'pull', sendAllAnswers: true });
+    s.stage.external_service = id;
+    await queueExternalStages(deps, REQ);
+    await deliverDue(deps);
+    const body = JSON.parse(sent[0]!.body as string) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(['callback', 'created_at', 'data_mode', 'event_id', 'organization', 'request', 'service', 'stage', 'type'].filter((k) => k in body).sort());
+    expect(body).toMatchObject({ type: 'stage.started', data_mode: 'pull', request: { id: REQ, confidential: false } });
+    expect(Object.keys(body.request as object).sort()).toEqual(['confidential', 'id']);
+    expect(JSON.stringify(body)).not.toMatch(/Acme|Planning|SSO|Ann Lee|risk/);
+    expect(pullPayload(s.request, s.stage, id, { publicApiUrl: 'https://api.example' })).not.toHaveProperty('request.answers');
+  });
+
+  it('marks events failed with a clear reason when the service is missing or off', async () => {
+    const fetchImpl = (async () => new Response('', { status: 200 })) as unknown as typeof fetch;
+    const { s, deps, call } = setup({ fetchImpl });
+    const { id } = await addService(call);
+    s.stage.external_service = 'gone';
+    await queueExternalStages(deps, REQ);
+    await deliverDue(deps);
+    expect(s.queue[0]).toMatchObject({ failed: true });
+    expect(s.queue[0]!.error).toMatch(/does not exist/);
+    await call('PUT', `/v1/integrations/review-services/${id}`, { ...SERVICE, enabled: false });
+    s.stage.external_service = id;
+    await queueExternalStages(deps, REQ);
+    await deliverDue(deps);
+    expect(s.queue[1]!.error).toMatch(/turned off/);
+    const log = (await (await call('GET', `/v1/integrations/review-services/${id}/deliveries`)).json()) as { last_error: string }[];
+    expect(log).toHaveLength(1);
+    expect(log[0]!.last_error).toMatch(/turned off/);
   });
 });
 
 describe('external review service endpoints', () => {
   async function signedSetup() {
     const ctx = setup();
-    const { secret } = (await (await ctx.call('PUT', '/v1/integrations/external', { enabled: true, name: 'SecTool', outboundUrl: 'https://sec.example/hook', sendAllAnswers: false })).json()) as { secret: string };
+    const { id, secret } = await addService(ctx.call);
+    ctx.s.stage.external_service = id;
     const post = async (body: Record<string, unknown>, sign = secret) => {
       const raw = JSON.stringify(body);
       return ctx.app.request(`/v1/external/stages/${STAGE}/status`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-signature': await signatureHeader(sign, raw) }, body: raw });
     };
-    return { ...ctx, secret, post };
+    return { ...ctx, id, secret, post };
   }
 
   it('accept a signed status update once, and refuse bad signatures', async () => {
@@ -324,6 +447,48 @@ describe('external review service endpoints', () => {
     const res = await app.request(url, { headers: { 'x-signature': await signatureHeader(secret, '') } });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ type: 'stage.started', stage: { id: STAGE }, stage_status: 'In review' });
+  });
+  it("verify with the secret of the stage's own service", async () => {
+    const { app, call, s, secret } = await signedSetup();
+    const other = await addService(call, { name: 'Legal tool' });
+    const raw = JSON.stringify({ event_id: 'x1', org_id: ORG, status: 'in_review' });
+    const send = async (sign: string) =>
+      app.request(`/v1/external/stages/${STAGE}/status`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-signature': await signatureHeader(sign, raw) }, body: raw });
+    // Another service's valid secret does not open this stage.
+    expect((await send(other.secret)).status).toBe(401);
+    expect((await send(secret)).status).toBe(200);
+    // A stage of the legacy single service uses the "default" service.
+    s.stage.external_service = null;
+    expect((await send(secret)).status).toBe(401);
+  });
+
+  it('read the legacy single service as "default" and convert it on the next save', async () => {
+    const { s, call, key, app } = setup();
+    const legacySecret = 'a'.repeat(64);
+    s.integration = {
+      config: { external: { enabled: true, name: 'Old tool', outboundUrl: 'https://old.example/hook', sendAllAnswers: true } },
+      secrets: await encrypt((await key)!, JSON.stringify({ externalSecret: legacySecret })),
+    };
+    const view = (await (await call('GET', '/v1/integrations')).json()) as { reviewServices: unknown[] };
+    expect(view.reviewServices).toEqual([{ id: 'default', name: 'Old tool', url: 'https://old.example/hook', dataMode: 'push', sendAllAnswers: true, enabled: true, hasSecret: true, usedBy: [] }]);
+    const raw = JSON.stringify({ event_id: 'l1', org_id: ORG, status: 'in_review' });
+    const res = await app.request(`/v1/external/stages/${STAGE}/status`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-signature': await signatureHeader(legacySecret, raw) }, body: raw });
+    expect(res.status).toBe(200);
+    await addService(call, { name: 'New tool' });
+    expect(s.integration!.config.external).toBeUndefined();
+    expect(s.integration!.config.reviewServices!.map((x) => x.id)).toEqual(['default', 'new-tool']);
+    const secrets = JSON.parse(await decrypt((await key)!, s.integration!.secrets!)) as { externalSecret?: string; serviceSecrets: Record<string, string> };
+    expect(secrets.externalSecret).toBeUndefined();
+    expect(secrets.serviceSecrets.default).toBe(legacySecret);
+  });
+
+  it('give a pull-mode service the full data on a signed GET', async () => {
+    const ctx = setup();
+    const { id, secret } = await addService(ctx.call, { dataMode: 'pull' });
+    ctx.s.stage.external_service = id;
+    const res = await ctx.app.request(`/v1/external/stages/${STAGE}?org_id=${ORG}`, { headers: { 'x-signature': await signatureHeader(secret, '') } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ data_mode: 'pull', service: { id }, request: { title: 'Acme Board', answers: { signInMethod: {} } } });
   });
 });
 
@@ -380,5 +545,210 @@ describe('hardening', () => {
     const res = await app.request(`/v1/external/stages/${STAGE}/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ big }) });
     expect(res.status).toBe(413);
     expect((await app.request('/v1/integrations', { headers: { authorization: 'Bearer t' } })).headers.get('cache-control')).toBe('no-store');
+  });
+});
+
+describe('settings in the UI, with the environment as fallback', () => {
+  it('saves the public API address and uses it over the environment', async () => {
+    const { call, s, settings } = setup({ env: { PUBLIC_API_URL: 'https://env.example' } });
+    expect(((await (await call('GET', '/v1/integrations')).json()) as { server: unknown }).server).toEqual({ publicApiUrl: 'https://env.example', source: 'env' });
+    expect((await call('PUT', '/v1/integrations/server', { publicApiUrl: 'http://api.example' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/server', { publicApiUrl: 'https://user:pw@api.example' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/server', { publicApiUrl: 'http://localhost:8787' })).status).toBe(200);
+    expect((await call('PUT', '/v1/integrations/server', { publicApiUrl: 'https://ui.example/' })).status).toBe(200);
+    expect(s.saved.at(-1)).toEqual({ action: 'integration.server_updated', metadata: { public_api_url: 'https://ui.example' } });
+    expect((await settings.forOrg(ORG)).publicApiUrl).toBe('https://ui.example');
+    expect(((await (await call('GET', '/v1/integrations')).json()) as { server: unknown }).server).toEqual({ publicApiUrl: 'https://ui.example', source: 'settings' });
+  });
+
+  it('saves email without returning or auditing the key, keeps a stored key when omitted, and sends a test', async () => {
+    const sent: { url: string; body: string }[] = [];
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      sent.push({ url, body: init.body as string });
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+    const { call, s, key } = setup({ fetchImpl, env: { EMAIL_PROVIDER: 'log' } });
+    expect(((await (await call('GET', '/v1/integrations')).json()) as { email: unknown }).email).toEqual({ provider: 'log', from: '', configured: true, source: 'env' });
+    expect((await call('PUT', '/v1/integrations/email', { provider: 'carrier-pigeon', from: '' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/email', { provider: 'resend', from: 'Acme <invites@acme.example>' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/email', { provider: 'resend', from: 'not an address', resendApiKey: 're_123456789' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/email', { provider: 'smtp', from: 'a@acme.example', smtpUrl: 'smtps://u:p@smtp.acme.example:465' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/email', { provider: 'resend', from: 'Acme <invites@acme.example>', resendApiKey: 're_123456789' })).status).toBe(200);
+    expect((await call('PUT', '/v1/integrations/email', { provider: 'resend', from: 'Acme <hello@acme.example>' })).status).toBe(200);
+    expect(JSON.parse(await decrypt((await key)!, s.integration!.secrets!)).resendApiKey).toBe('re_123456789');
+    expect(JSON.stringify(s.saved)).not.toContain('re_123456789');
+    const view = await (await call('GET', '/v1/integrations')).text();
+    expect(view).not.toContain('re_123456789');
+    expect(JSON.parse(view).email).toEqual({ provider: 'resend', from: 'Acme <hello@acme.example>', configured: true, source: 'settings' });
+    // The test mail goes to the admin through the saved provider (Resend here).
+    const res = await call('POST', '/v1/integrations/email/test', {});
+    expect(res.status).toBe(200);
+    expect(sent[0]!.url).toBe('https://api.resend.com/emails');
+    expect(JSON.parse(sent[0]!.body)).toMatchObject({ from: 'Acme <hello@acme.example>', to: ['admin@acme.example'] });
+  });
+
+  it('reports a failed test email as 502 without details', async () => {
+    const fetchImpl = (async () => new Response('{"secret":"x"}', { status: 403 })) as unknown as typeof fetch;
+    const { call } = setup({ fetchImpl });
+    expect((await call('POST', '/v1/integrations/email/test', {})).status).toBe(422);
+    await call('PUT', '/v1/integrations/email', { provider: 'resend', from: 'a@acme.example', resendApiKey: 're_123456789' });
+    const res = await call('POST', '/v1/integrations/email/test', {});
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: 'The email service rejected the API key or sender' });
+  });
+
+  it('uses SMTP only on the Node API, and the saved mailer for invitations', async () => {
+    const { call, mails, app } = setup({ smtp: true });
+    expect((await call('PUT', '/v1/integrations/email', { provider: 'smtp', from: 'a@acme.example', smtpUrl: 'smtps://u:p@smtp.acme.example:465' })).status).toBe(200);
+    expect(await (await app.request('/v1/invitations/email-status', { headers: { authorization: 'Bearer t' } })).json()).toEqual({ enabled: true });
+    const res = await call('POST', '/v1/invitations', { invitations: [{ email: 'bob@acme.example', role: 'reviewer' }] });
+    expect(((await res.json()) as { results: { emailed: boolean }[] }).results[0]!.emailed).toBe(true);
+    expect(mails).toEqual([{ to: 'bob@acme.example', subject: 'Join Acme on [Product name]', via: 'smtp:smtps://u:p@smtp.acme.example:465' }]);
+    // Without a token the status says nothing about an organization.
+    expect(await (await app.request('/v1/invitations/email-status')).json()).toEqual({ enabled: false });
+  });
+
+  it('saves the AI provider and uses it for that organization only', async () => {
+    const { call, app, s, key } = setup();
+    expect(await (await app.request('/v1/ai', { headers: { authorization: 'Bearer t' } })).json()).toEqual({ enabled: false, provider: null });
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'parallel' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'parallel', processor: 'ultra', apiKey: 'par-123456789' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'parallel', processor: 'lite', apiKey: 'par-123456789' })).status).toBe(200);
+    expect(JSON.stringify(s.saved)).not.toContain('par-123456789');
+    expect(JSON.parse(await decrypt((await key)!, s.integration!.secrets!)).parallelApiKey).toBe('par-123456789');
+    const view = (await (await call('GET', '/v1/integrations')).json()) as { ai: unknown };
+    expect(view.ai).toEqual({ provider: 'parallel', processor: 'lite', configured: true, source: 'settings' });
+    expect(await (await app.request('/v1/ai', { headers: { authorization: 'Bearer t' } })).json()).toMatchObject({ enabled: true });
+    expect(await (await app.request('/v1/ai')).json()).toMatchObject({ enabled: false });
+    expect((await setup({ caller: { ...admin, role: 'reviewer' } }).call('PUT', '/v1/integrations/ai', { provider: 'off' })).status).toBe(403);
+  });
+
+  it('caches per organization for a short time and drops the cache on save', async () => {
+    let t = 0;
+    const { store } = memoryStore();
+    const key = importEncryptionKey(KEY_B64);
+    const resolver = settingsResolver({ store, key, env: envSettings({ PUBLIC_API_URL: 'https://env.example' }), now: () => t });
+    expect((await resolver.forOrg(ORG)).publicApiUrl).toBe('https://env.example');
+    await store.saveIntegration(ORG, { config: { server: { publicApiUrl: 'https://ui.example' } }, secrets: null }, 'u1', 'x', {});
+    expect((await resolver.forOrg(ORG)).publicApiUrl).toBe('https://env.example');
+    t = 31_000;
+    expect((await resolver.forOrg(ORG)).publicApiUrl).toBe('https://ui.example');
+    await store.saveIntegration(ORG, { config: {}, secrets: null }, 'u1', 'x', {});
+    resolver.invalidate(ORG);
+    expect((await resolver.forOrg(ORG)).publicApiUrl).toBe('https://env.example');
+  });
+});
+
+describe('review services', () => {
+  it('are managed by org admins only; members see names only', async () => {
+    const reviewer = setup({ caller: { ...admin, role: 'reviewer' } });
+    expect((await reviewer.call('POST', '/v1/integrations/review-services', SERVICE)).status).toBe(403);
+    expect((await reviewer.call('GET', '/v1/integrations/review-services/x/deliveries')).status).toBe(403);
+    expect((await setup({ caller: null }).call('GET', '/v1/review-services')).status).toBe(403);
+    const { call, s } = setup();
+    await addService(call);
+    s.integration = { ...s.integration!, config: s.integration!.config };
+    expect(await (await call('GET', '/v1/review-services')).json()).toEqual([{ id: 'sectool', name: 'SecTool' }]);
+    // Any member may list them, also with the shared memory of this setup.
+    const requester = setup({ caller: { ...admin, role: 'requester' } });
+    await requester.store.saveIntegration(ORG, s.integration!, 'u1', 'x', {});
+    expect(await (await requester.call('GET', '/v1/review-services')).json()).toEqual([{ id: 'sectool', name: 'SecTool' }]);
+    expect((await setup({ withKey: false }).call('POST', '/v1/integrations/review-services', SERVICE)).status).toBe(503);
+  });
+
+  it('refuse local and private addresses unless allowed', async () => {
+    const { call } = setup();
+    for (const url of ['http://localhost:9000/hook', 'https://127.0.0.1/hook', 'https://10.1.2.3/x', 'https://169.254.169.254/latest', 'https://[::1]/x', 'https://intranet/x']) {
+      expect((await call('POST', '/v1/integrations/review-services', { ...SERVICE, url })).status, url).toBe(422);
+    }
+    const local = setup({ allowLocal: true });
+    expect((await local.call('POST', '/v1/integrations/review-services', { ...SERVICE, url: 'http://localhost:9000/hook' })).status).toBe(201);
+  });
+
+  it('update, and refuse to delete a service a review still uses', async () => {
+    const { call, s } = setup();
+    const { id } = await addService(call);
+    const put = await call('PUT', `/v1/integrations/review-services/${id}`, { ...SERVICE, name: 'SecTool 2', dataMode: 'pull' });
+    expect(await put.json()).toEqual({ service: { id, ...SERVICE, name: 'SecTool 2', dataMode: 'pull' } });
+    expect((await call('PUT', '/v1/integrations/review-services/nope', SERVICE)).status).toBe(404);
+    s.workflow = workflowUsing(id);
+    expect(((await (await call('GET', '/v1/integrations')).json()) as { reviewServices: { usedBy: string[] }[] }).reviewServices[0]!.usedBy).toEqual(['Security review']);
+    const busy = await call('DELETE', `/v1/integrations/review-services/${id}`);
+    expect(busy.status).toBe(409);
+    expect(((await busy.json()) as { error: string }).error).toMatch(/Security review/);
+    s.workflow = null;
+    expect((await call('DELETE', `/v1/integrations/review-services/${id}`)).status).toBe(204);
+    expect(s.saved.at(-1)).toEqual({ action: 'integration.review_service_removed', metadata: { id } });
+    expect(((await (await call('GET', '/v1/integrations')).json()) as { reviewServices: unknown[] }).reviewServices).toEqual([]);
+    expect((await call('DELETE', `/v1/integrations/review-services/${id}`)).status).toBe(404);
+  });
+
+  it('send a signed ping and report only status and time', async () => {
+    const sent: { url: string; init: RequestInit }[] = [];
+    let answer: () => Promise<Response> = async () => new Response('secret body from service', { status: 200 });
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      sent.push({ url, init });
+      return answer();
+    }) as unknown as typeof fetch;
+    const { call } = setup({ fetchImpl });
+    const { id, secret } = await addService(call);
+    const ok = (await (await call('POST', `/v1/integrations/review-services/${id}/test`)).json()) as Record<string, unknown>;
+    expect(ok).toMatchObject({ ok: true, status: 200 });
+    expect(typeof ok.ms).toBe('number');
+    expect(JSON.stringify(ok)).not.toContain('secret body');
+    const body = JSON.parse(sent[0]!.init.body as string) as Record<string, unknown>;
+    expect(body).toMatchObject({ type: 'ping', organization: { id: ORG }, service: { id } });
+    expect(String(body.event_id)).toMatch(/^ping:/);
+    const headers = sent[0]!.init.headers as Record<string, string>;
+    expect(await verifySignature(secret, headers['x-signature'], sent[0]!.init.body as string)).toBe('ok');
+    expect(headers['x-service-id']).toBe(id);
+    answer = async () => new Response('nope', { status: 500 });
+    expect(await (await call('POST', `/v1/integrations/review-services/${id}/test`)).json()).toMatchObject({ ok: false, status: 500, error: 'The service answered 500' });
+    answer = async () => {
+      throw new TypeError('fetch failed');
+    };
+    expect(await (await call('POST', `/v1/integrations/review-services/${id}/test`)).json()).toMatchObject({ ok: false, status: null, error: 'The service could not be reached' });
+  });
+
+  it('list recent deliveries of one service', async () => {
+    const fetchImpl = (async () => new Response('', { status: 200 })) as unknown as typeof fetch;
+    const { call, s, deps } = setup({ fetchImpl });
+    const a = await addService(call);
+    const b = await addService(call, { name: 'Other' });
+    s.stage.external_service = a.id;
+    await queueExternalStages(deps, REQ);
+    await deliverDue(deps);
+    const log = (await (await call('GET', `/v1/integrations/review-services/${a.id}/deliveries`)).json()) as Record<string, unknown>[];
+    expect(log).toHaveLength(1);
+    expect(log[0]).toMatchObject({ type: 'stage.started', attempts: 0, last_error: null });
+    expect(log[0]!.delivered_at).toBeTruthy();
+    expect(Object.keys(log[0]!).sort()).toEqual(['attempts', 'created_at', 'delivered_at', 'failed_at', 'id', 'last_error', 'next_attempt_at', 'type']);
+    expect(await (await call('GET', `/v1/integrations/review-services/${b.id}/deliveries`)).json()).toEqual([]);
+    expect((await call('GET', '/v1/integrations/review-services/nope/deliveries')).status).toBe(404);
+  });
+});
+
+describe('exchange spec', () => {
+  it('is public, cacheable and describes both directions', async () => {
+    const { app } = setup({ caller: null });
+    const res = await app.request('/v1/external/spec');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
+    const spec = (await res.json()) as { openapi: string; paths: Record<string, unknown>; webhooks: Record<string, unknown>; components: { schemas: Record<string, { properties?: Record<string, { enum?: string[] }> }> } };
+    expect(spec.openapi).toBe('3.1.0');
+    expect(Object.keys(spec.paths)).toEqual(['/external/stages/{stageId}/status', '/external/stages/{stageId}']);
+    expect(Object.keys(spec.webhooks)).toEqual(['ping', 'stage.started (push)', 'stage.started (pull)']);
+    expect(spec.components.schemas.StatusUpdate!.properties!.status!.enum).toContain('approved_with_conditions');
+    expect(JSON.stringify(spec)).toContain('X-Signature');
+  });
+});
+
+describe('without the encryption key', () => {
+  it('saves the server address but keeps stored secrets untouched', async () => {
+    const { call, s } = setup({ withKey: false });
+    s.integration = { config: {}, secrets: 'iv.ciphertext' };
+    expect((await call('PUT', '/v1/integrations/server', { publicApiUrl: 'https://ui.example' })).status).toBe(200);
+    expect(s.integration).toEqual({ config: { server: { publicApiUrl: 'https://ui.example' } }, secrets: 'iv.ciphertext' });
+    expect((await call('PUT', '/v1/integrations/email', { provider: 'log', from: '' })).status).toBe(503);
   });
 });

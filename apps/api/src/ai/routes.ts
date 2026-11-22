@@ -9,9 +9,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** One AI call per request at a time, and not more often than this. Per process only. */
 const MIN_INTERVAL_MS = 10_000;
 
-/** AI assistance for drafts. Mounted only when a provider is configured. */
-export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) {
+/**
+ * AI assistance for drafts. The provider comes from the organization's settings when
+ * `providerFor` is given (Admin → Integrations), else from the environment.
+ */
+export function aiRoutes(
+  store: RequestStore,
+  provider: AiProvider | undefined,
+  perOrg?: { providerFor(orgId: string): Promise<AiProvider | undefined>; orgOf(token: string): Promise<string | null> },
+) {
   const routes = new Hono();
+  const providerFor = async (orgId: string) => (perOrg ? perOrg.providerFor(orgId) : provider);
   const lastCall = new Map<string, number>();
 
   /** The organization's settings for the check; stored settings that fail validation are ignored. */
@@ -24,11 +32,19 @@ export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) 
     return DEFAULT_AI_CHECK_SETTINGS;
   }
 
-  routes.get('/ai', (c) => c.json({ enabled: provider !== undefined, provider: provider?.name ?? null } satisfies AiStatus));
+  routes.get('/ai', async (c) => {
+    let current = provider;
+    if (perOrg) {
+      const token = c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1];
+      const orgId = token ? await perOrg.orgOf(token).catch(() => null) : null;
+      current = orgId ? await perOrg.providerFor(orgId) : undefined;
+    }
+    return c.json({ enabled: current !== undefined, provider: current?.name ?? null } satisfies AiStatus);
+  });
 
   /** Loads the caller's own draft, or answers with the right error. */
-  async function draft(c: Context): Promise<DraftRecord | Response> {
-    if (!provider) return c.json({ error: 'AI assistance is not enabled' }, 404);
+  async function draft(c: Context): Promise<{ request: DraftRecord; ai: AiProvider } | Response> {
+    if (!perOrg && !provider) return c.json({ error: 'AI assistance is not enabled' }, 404);
     const token = c.req.header('authorization')?.match(/^Bearer (.+)$/i)?.[1];
     if (!token) return c.json({ error: 'Sign in to continue' }, 401);
     const id = c.req.param('id') ?? '';
@@ -42,7 +58,9 @@ export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) 
     }
     if (!request) return c.json({ error: 'Not found' }, 404);
     if (request.status !== 'draft') return c.json({ error: 'AI assistance is available for drafts only' }, 409);
-    return request;
+    const ai = await providerFor(request.org_id);
+    if (!ai) return c.json({ error: 'AI assistance is not enabled' }, 404);
+    return { request, ai };
   }
 
   /** Returns a 429 response when this request asked too recently; otherwise records the call. */
@@ -56,16 +74,16 @@ export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) 
     return null;
   }
 
-  async function run<T>(c: Context, task: AiTask, parse: (result: Awaited<ReturnType<AiProvider['run']>>) => T) {
+  async function run<T>(c: Context, provider: AiProvider, task: AiTask, parse: (result: Awaited<ReturnType<AiProvider['run']>>) => T) {
     try {
       const started = Date.now();
-      const result = parse(await provider!.run(task));
-      console.info(`AI ${c.req.path.split('/').pop()} via ${provider!.name}: done in ${Math.round((Date.now() - started) / 1000)}s`);
+      const result = parse(await provider.run(task));
+      console.info(`AI ${c.req.path.split('/').pop()} via ${provider.name}: done in ${Math.round((Date.now() - started) / 1000)}s`);
       return c.json(result);
     } catch (error) {
       if (error instanceof AiProviderError) {
         // Shown in the API terminal so a failure can be diagnosed. Never contains the key or answers.
-        console.warn(`AI ${c.req.path.split('/').pop()} via ${provider!.name} failed: ${error.message}`);
+        console.warn(`AI ${c.req.path.split('/').pop()} via ${provider.name} failed: ${error.message}`);
         return c.json({ error: error.message }, 502);
       }
       throw error;
@@ -73,23 +91,25 @@ export function aiRoutes(store: RequestStore, provider: AiProvider | undefined) 
   }
 
   routes.post('/requests/:id/ai/suggestions', async (c) => {
-    const request = await draft(c);
-    if (request instanceof Response) return request;
+    const found = await draft(c);
+    if (found instanceof Response) return found;
+    const { request, ai } = found;
     const task = vendorLookupTask(request.answers);
     if (!task) return c.json({ error: 'Enter the service name or the vendor first' }, 422);
     const limited = throttled(c, request.id);
     if (limited) return limited;
-    return run(c, task, (result) => ({ suggestions: suggestionsFromResult(result, request.answers, formOf(request)) }));
+    return run(c, ai, task, (result) => ({ suggestions: suggestionsFromResult(result, request.answers, formOf(request)) }));
   });
 
   routes.post('/requests/:id/ai/check', async (c) => {
-    const request = await draft(c);
-    if (request instanceof Response) return request;
+    const found = await draft(c);
+    if (found instanceof Response) return found;
+    const { request, ai } = found;
     const limited = throttled(c, request.id);
     if (limited) return limited;
     const form = formOf(request);
     const settings = await checkSettings(request.org_id);
-    return run(c, answerCheckTask(request.answers, form, settings), (result) => ({ remarks: remarksFromResult(result, form, request.answers, settings) }));
+    return run(c, ai, answerCheckTask(request.answers, form, settings), (result) => ({ remarks: remarksFromResult(result, form, request.answers, settings) }));
   });
 
   return routes;

@@ -1,9 +1,24 @@
-import { parseExternalStatusUpdate } from '@app/shared';
+import { ORG_ROLES, parseExternalStatusUpdate, parseReviewServiceInput, parseWorkflowSettings, reviewServiceId, type ReviewService } from '@app/shared';
 import { Hono, type Context } from 'hono';
 import type { Caller } from './admin';
-import { decrypt, encrypt, randomSecret, verifySignature, type EncryptionKey } from './crypto';
-import { readSecrets, runOutbox, stageStartedPayload, type DispatcherDeps } from './dispatcher';
-import { ExternalUpdateRejected, SLACK_EVENTS, type IntegrationConfig, type IntegrationSecrets, type IntegrationStore, type SlackEvent } from './integrationStore';
+import { decrypt, encrypt, randomSecretB64url, verifySignature, type EncryptionKey } from './crypto';
+import { runOutbox, sendSigned, stageStartedPayload, type DispatcherDeps } from './dispatcher';
+import { externalReviewSpec } from './externalSpec';
+import {
+  AI_PROCESSORS,
+  AI_PROVIDERS,
+  EMAIL_PROVIDERS,
+  ExternalUpdateRejected,
+  SLACK_EVENTS,
+  type AiProcessor,
+  type AiProviderName,
+  type EmailProviderName,
+  type IntegrationConfig,
+  type IntegrationSecrets,
+  type IntegrationStore,
+  type SlackEvent,
+} from './integrationStore';
+import { reviewServicesOf, type SettingsResolver } from './orgSettings';
 import { UnauthorizedError, type RequestStore } from './requests';
 import { hostnameOf, lookupUpGuard, UpGuardError } from './upguard';
 
@@ -12,6 +27,36 @@ import { hostnameOf, lookupUpGuard, UpGuardError } from './upguard';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REVIEWER_ROLES = new Set(['org_admin', 'process_manager', 'reviewer']);
+const ALL_ROLES = new Set<string>(ORG_ROLES);
+
+/** https://, or http:// on this machine for testing. */
+export function isPublicApiUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.username || u.password || url.length > 300) return false;
+    return u.protocol === 'https:' || (u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1'));
+  } catch {
+    return false;
+  }
+}
+
+/** Loopback, private, link-local and internal names: refused for review services unless allowed. */
+export function isLocalAddress(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  } catch {
+    return true;
+  }
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || !host.includes('.') && !host.includes(':')) return true;
+  const v4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (host.includes(':')) return host === '::1' || host === '::' || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith('::ffff:');
+  return false;
+}
 
 export interface IntegrationRouteOptions {
   store: IntegrationStore;
@@ -19,8 +64,15 @@ export interface IntegrationRouteOptions {
   getCaller: (token: string) => Promise<Caller | null>;
   key: Promise<EncryptionKey | null>;
   webOrigin: string;
+  /** Environment fallback for the public API address. */
   publicApiUrl?: string;
   upguardBaseUrl: string;
+  /** Per-organization settings (UI first, environment as fallback). */
+  settings: SettingsResolver;
+  /** SMTP needs the Node API. */
+  smtpSupported?: boolean;
+  /** Allow localhost and private addresses for review services (local testing only). */
+  allowLocalServiceUrls?: boolean;
   fetchImpl?: typeof fetch;
   now?: () => number;
 }
@@ -55,6 +107,16 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
     const hasSecrets = Object.values(secrets).some(Boolean);
     await o.store.saveIntegration(orgId, { config, secrets: hasSecrets ? await encrypt(key, JSON.stringify(secrets)) : null }, actorId, action, metadata);
   }
+  /** Save and drop the cached settings so the change applies at once. */
+  async function saveAll(orgId: string, config: IntegrationConfig, secrets: IntegrationSecrets, actorId: string, action: string, metadata: Record<string, unknown>) {
+    if (await o.key) await save(orgId, config, secrets, actorId, action, metadata);
+    else {
+      // Without the key (only non-secret settings get here): keep stored secrets as they are.
+      const record = await o.store.getIntegration(orgId);
+      await o.store.saveIntegration(orgId, { config, secrets: record?.secrets ?? null }, actorId, action, metadata);
+    }
+    o.settings.invalidate(orgId);
+  }
   async function body(c: Context): Promise<Record<string, unknown> | Response> {
     try {
       const b = (await c.req.json()) as unknown;
@@ -75,18 +137,22 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
     const who = await admin(c);
     if (who instanceof Response) return who;
     const encryptionReady = (await o.key) !== null;
-    const { config, secrets } = encryptionReady ? await load(who.orgId) : { config: (await o.store.getIntegration(who.orgId))?.config ?? {}, secrets: {} as IntegrationSecrets };
+    const r = await o.settings.forOrg(who.orgId);
+    const { config, secrets } = r;
+    const { serviceSecrets } = reviewServicesOf(config, secrets);
+    const reviewServices = await Promise.all(
+      r.services.map(async (s) => ({ ...s, hasSecret: !!serviceSecrets[s.id], usedBy: await usedBy(who.orgId, s.id) })),
+    );
+    // Never any secret: only whether one is saved.
     return c.json({
       encryptionReady,
+      server: { publicApiUrl: r.publicApiUrl ?? '', source: r.publicApiSource },
+      email: { provider: r.email.provider, from: r.email.from, configured: r.email.configured, source: r.email.source },
+      ai: { provider: r.aiInfo.provider, processor: r.aiInfo.processor, configured: r.aiInfo.configured, source: r.aiInfo.source },
       slack: { enabled: !!config.slack?.enabled, configured: !!secrets.slackWebhookUrl, events: config.slack?.events ?? [...SLACK_EVENTS] },
       upguard: { enabled: !!config.upguard?.enabled, configured: !!secrets.upguardApiKey },
-      external: {
-        enabled: !!config.external?.enabled,
-        name: config.external?.name ?? '',
-        outboundUrl: config.external?.outboundUrl ?? '',
-        configured: !!secrets.externalSecret,
-        sendAllAnswers: !!config.external?.sendAllAnswers,
-      },
+      reviewServices,
+      smtpSupported: !!o.smtpSupported,
     });
   });
 
@@ -106,7 +172,7 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
     const nextSecrets = { ...secrets, ...(typeof b.webhookUrl === 'string' ? { slackWebhookUrl: b.webhookUrl } : {}) };
     if (b.enabled && !nextSecrets.slackWebhookUrl) return c.json({ error: 'Enter the Slack webhook URL' }, 422);
     const wasOn = !!config.slack?.enabled;
-    await save(who.orgId, { ...config, slack: { enabled: b.enabled, events: [...new Set(b.events as SlackEvent[])] } }, nextSecrets, who.userId, 'integration.slack_updated', {
+    await saveAll(who.orgId, { ...config, slack: { enabled: b.enabled, events: [...new Set(b.events as SlackEvent[])] } }, nextSecrets, who.userId, 'integration.slack_updated', {
       enabled: b.enabled,
       events: b.events,
       webhook_changed: typeof b.webhookUrl === 'string',
@@ -148,45 +214,273 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
     const { config, secrets } = await load(who.orgId);
     const nextSecrets = { ...secrets, ...(typeof b.apiKey === 'string' ? { upguardApiKey: b.apiKey.trim() } : {}) };
     if (b.enabled && !nextSecrets.upguardApiKey) return c.json({ error: 'Enter the UpGuard API key' }, 422);
-    await save(who.orgId, { ...config, upguard: { enabled: b.enabled } }, nextSecrets, who.userId, 'integration.upguard_updated', { enabled: b.enabled, key_changed: typeof b.apiKey === 'string' });
+    await saveAll(who.orgId, { ...config, upguard: { enabled: b.enabled } }, nextSecrets, who.userId, 'integration.upguard_updated', { enabled: b.enabled, key_changed: typeof b.apiKey === 'string' });
     return c.json({ ok: true });
   });
 
-  routes.put('/integrations/external', async (c) => {
+  // ---------------------------------------------------------------------------
+  // Server address, email and AI, set in the UI (the environment is the fallback)
+  // ---------------------------------------------------------------------------
+
+  routes.put('/integrations/server', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const b = await body(c);
+    if (b instanceof Response) return b;
+    const url = typeof b.publicApiUrl === 'string' ? b.publicApiUrl.trim().replace(/\/+$/, '') : '';
+    if (url !== '' && !isPublicApiUrl(url)) return c.json({ error: 'The address must start with https:// (http://localhost is allowed for testing)' }, 422);
+    const { config, secrets } = await load(who.orgId);
+    const next: IntegrationConfig = { ...config };
+    if (url) next.server = { publicApiUrl: url };
+    else delete next.server;
+    await saveAll(who.orgId, next, secrets, who.userId, 'integration.server_updated', { public_api_url: url || null });
+    return c.json({ ok: true });
+  });
+
+  routes.put('/integrations/email', async (c) => {
     const who = await admin(c);
     if (who instanceof Response) return who;
     const missing = await needKey(c);
     if (missing) return missing;
     const b = await body(c);
     if (b instanceof Response) return b;
-    if (typeof b.enabled !== 'boolean' || typeof b.sendAllAnswers !== 'boolean') return c.json({ error: 'Choose whether the service is on and which answers it gets' }, 422);
-    const name = typeof b.name === 'string' ? b.name.trim() : '';
-    if (name.length < 1 || name.length > 60) return c.json({ error: 'Name the service (1 to 60 characters)' }, 422);
-    if (typeof b.outboundUrl !== 'string' || !/^https:\/\/\S+$/.test(b.outboundUrl) || b.outboundUrl.length > 500) return c.json({ error: 'The service URL must start with https://' }, 422);
+    if (!(EMAIL_PROVIDERS as readonly unknown[]).includes(b.provider)) return c.json({ error: 'Choose how email is sent' }, 422);
+    const provider = b.provider as EmailProviderName;
+    const from = typeof b.from === 'string' ? b.from.trim() : '';
+    if (from.length > 200 || /[\r\n]/.test(from)) return c.json({ error: 'The sender is too long or not on one line' }, 422);
+    if ((provider === 'resend' || provider === 'smtp') && !/^(?:[^<>@\r\n]{0,100}<[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>|[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+)$/.test(from)) {
+      return c.json({ error: 'Enter the sender, for example "[Product name] <invites@your-domain.com>"' }, 422);
+    }
+    if (b.resendApiKey !== undefined && (typeof b.resendApiKey !== 'string' || b.resendApiKey.trim().length < 8 || b.resendApiKey.length > 500)) {
+      return c.json({ error: 'Enter a valid Resend API key' }, 422);
+    }
+    if (b.smtpUrl !== undefined && (typeof b.smtpUrl !== 'string' || !/^smtps?:\/\/\S+$/.test(b.smtpUrl.trim()) || b.smtpUrl.length > 500)) {
+      return c.json({ error: 'The SMTP address must look like smtps://user:password@smtp.example.com:465' }, 422);
+    }
+    if (provider === 'smtp' && !o.smtpSupported) {
+      return c.json({ error: 'SMTP works only when the API runs on Node (self-host). Use Resend on this server.' }, 422);
+    }
     const { config, secrets } = await load(who.orgId);
-    const generate = b.rotateSecret === true || !secrets.externalSecret;
-    const nextSecrets = generate ? { ...secrets, externalSecret: randomSecret() } : secrets;
-    await save(
-      who.orgId,
-      { ...config, external: { enabled: b.enabled, name, outboundUrl: b.outboundUrl, sendAllAnswers: b.sendAllAnswers } },
-      nextSecrets,
-      who.userId,
-      'integration.external_updated',
-      { enabled: b.enabled, name, send_all_answers: b.sendAllAnswers, secret_rotated: generate },
-    );
-    // The secret is shown once, when it is created.
-    return c.json(generate ? { ok: true, secret: nextSecrets.externalSecret } : { ok: true });
+    const next: IntegrationSecrets = {
+      ...secrets,
+      ...(typeof b.resendApiKey === 'string' ? { resendApiKey: b.resendApiKey.trim() } : {}),
+      ...(typeof b.smtpUrl === 'string' ? { smtpUrl: b.smtpUrl.trim() } : {}),
+    };
+    if (provider === 'resend' && !next.resendApiKey) return c.json({ error: 'Enter the Resend API key' }, 422);
+    if (provider === 'smtp' && !next.smtpUrl) return c.json({ error: 'Enter the SMTP address' }, 422);
+    await saveAll(who.orgId, { ...config, email: { provider, from } }, next, who.userId, 'integration.email_updated', {
+      provider,
+      from,
+      key_changed: typeof b.resendApiKey === 'string',
+      smtp_changed: typeof b.smtpUrl === 'string',
+    });
+    return c.json({ ok: true });
+  });
+
+  routes.post('/integrations/email/test', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    if (!who.email) return c.json({ error: 'Your account has no email address to send the test to' }, 422);
+    const resolved = await o.settings.forOrg(who.orgId);
+    if (!resolved.mailer) return c.json({ error: 'Email is off or not complete. Save the settings first.' }, 422);
+    try {
+      await resolved.mailer.send({
+        to: who.email,
+        subject: 'Test email from [Product name]',
+        text: 'Email works. Invitations will be sent from this address.',
+        html: '<p>Email works. Invitations will be sent from this address.</p>',
+      });
+    } catch (error) {
+      return c.json({ error: error instanceof Error && error.name === 'EmailError' ? error.message : 'The email could not be sent' }, 502);
+    }
+    return c.json({ ok: true });
+  });
+
+  routes.put('/integrations/ai', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const missing = await needKey(c);
+    if (missing) return missing;
+    const b = await body(c);
+    if (b instanceof Response) return b;
+    if (!(AI_PROVIDERS as readonly unknown[]).includes(b.provider)) return c.json({ error: 'Choose the AI provider, or off' }, 422);
+    const processor = b.processor === undefined ? 'base' : b.processor;
+    if (!(AI_PROCESSORS as readonly unknown[]).includes(processor)) return c.json({ error: 'Choose lite, base or core' }, 422);
+    if (b.apiKey !== undefined && (typeof b.apiKey !== 'string' || b.apiKey.trim().length < 8 || b.apiKey.length > 500)) return c.json({ error: 'Enter a valid API key' }, 422);
+    const { config, secrets } = await load(who.orgId);
+    const next = { ...secrets, ...(typeof b.apiKey === 'string' ? { parallelApiKey: b.apiKey.trim() } : {}) };
+    if (b.provider === 'parallel' && !next.parallelApiKey) return c.json({ error: 'Enter the Parallel API key' }, 422);
+    await saveAll(who.orgId, { ...config, ai: { provider: b.provider as AiProviderName, processor: processor as AiProcessor } }, next, who.userId, 'integration.ai_updated', {
+      provider: b.provider,
+      processor,
+      key_changed: typeof b.apiKey === 'string',
+    });
+    return c.json({ ok: true });
   });
 
   // ---------------------------------------------------------------------------
-  // Called by the external review service, signed with the shared secret
+  // Review services: one microservice per review, if wanted
   // ---------------------------------------------------------------------------
 
-  async function externalSecret(orgId: string): Promise<string | null> {
-    if (!UUID.test(orgId)) return null;
-    const record = await o.store.getIntegration(orgId);
-    if (!record?.config.external?.enabled) return null;
-    return (await readSecrets(await o.key, record.secrets).catch(() => ({}) as IntegrationSecrets)).externalSecret ?? null;
+  /** Services and their secrets, with the legacy single service converted. */
+  async function services(orgId: string) {
+    const { config, secrets } = await load(orgId);
+    const { services: list, serviceSecrets } = reviewServicesOf(config, secrets);
+    return { config, secrets, list: [...list], serviceSecrets: { ...serviceSecrets } };
+  }
+  async function saveServices(
+    orgId: string,
+    s: { config: IntegrationConfig; secrets: IntegrationSecrets; list: ReviewService[]; serviceSecrets: Record<string, string> },
+    actorId: string,
+    action: string,
+    metadata: Record<string, unknown>,
+  ) {
+    const config: IntegrationConfig = { ...s.config, reviewServices: s.list };
+    delete config.external;
+    const secrets: IntegrationSecrets = { ...s.secrets, serviceSecrets: s.serviceSecrets };
+    delete secrets.externalSecret;
+    await saveAll(orgId, config, secrets, actorId, action, metadata);
+  }
+  function checkServiceUrl(c: Context, url: string): Response | null {
+    if (isLocalAddress(url) && !o.allowLocalServiceUrls) {
+      return c.json({ error: 'Local and private addresses are refused. For local testing set ALLOW_LOCAL_SERVICE_URLS=true on the API server.' }, 422);
+    }
+    return null;
+  }
+  async function usedBy(orgId: string, serviceId: string): Promise<string[]> {
+    const stored = o.requests.getWorkflowSettings ? await o.requests.getWorkflowSettings(orgId) : null;
+    if (!stored) return [];
+    const parsed = parseWorkflowSettings(stored);
+    if ('error' in parsed) return [];
+    return Object.entries(parsed.settings)
+      .filter(([, st]) => st.handledBy === 'external' && (st.serviceId ?? 'default') === serviceId)
+      .map(([name]) => name);
+  }
+
+  routes.post('/integrations/review-services', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const missing = await needKey(c);
+    if (missing) return missing;
+    const b = await body(c);
+    if (b instanceof Response) return b;
+    const parsed = parseReviewServiceInput(b);
+    if ('error' in parsed) return c.json({ error: parsed.error }, 422);
+    const bad = checkServiceUrl(c, parsed.service.url);
+    if (bad) return bad;
+    const s = await services(who.orgId);
+    if (s.list.length >= 20) return c.json({ error: 'Use at most 20 review services' }, 422);
+    const service: ReviewService = { id: reviewServiceId(parsed.service.name, new Set(s.list.map((x) => x.id))), ...parsed.service };
+    const secret = randomSecretB64url();
+    s.list.push(service);
+    s.serviceSecrets[service.id] = secret;
+    await saveServices(who.orgId, s, who.userId, 'integration.review_service_added', { id: service.id, name: service.name, url: service.url, data_mode: service.dataMode });
+    // The secret is shown once.
+    return c.json({ service, secret }, 201);
+  });
+
+  routes.put('/integrations/review-services/:id', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const missing = await needKey(c);
+    if (missing) return missing;
+    const b = await body(c);
+    if (b instanceof Response) return b;
+    const parsed = parseReviewServiceInput(b);
+    if ('error' in parsed) return c.json({ error: parsed.error }, 422);
+    const bad = checkServiceUrl(c, parsed.service.url);
+    if (bad) return bad;
+    const s = await services(who.orgId);
+    const index = s.list.findIndex((x) => x.id === c.req.param('id'));
+    if (index < 0) return c.json({ error: 'Not found' }, 404);
+    const service: ReviewService = { id: s.list[index]!.id, ...parsed.service };
+    s.list[index] = service;
+    await saveServices(who.orgId, s, who.userId, 'integration.review_service_updated', { id: service.id, name: service.name, url: service.url, data_mode: service.dataMode, enabled: service.enabled });
+    return c.json({ service });
+  });
+
+  routes.post('/integrations/review-services/:id/rotate-secret', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const missing = await needKey(c);
+    if (missing) return missing;
+    const s = await services(who.orgId);
+    const service = s.list.find((x) => x.id === c.req.param('id'));
+    if (!service) return c.json({ error: 'Not found' }, 404);
+    const secret = randomSecretB64url();
+    s.serviceSecrets[service.id] = secret;
+    await saveServices(who.orgId, s, who.userId, 'integration.review_service_secret_rotated', { id: service.id });
+    return c.json({ secret });
+  });
+
+  routes.delete('/integrations/review-services/:id', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const missing = await needKey(c);
+    if (missing) return missing;
+    const s = await services(who.orgId);
+    const id = c.req.param('id');
+    if (!s.list.some((x) => x.id === id)) return c.json({ error: 'Not found' }, 404);
+    const stages = await usedBy(who.orgId, id);
+    if (stages.length > 0) return c.json({ error: `Still used by: ${stages.join(', ')}. Choose another service for them in Admin → Reviews first.` }, 409);
+    s.list = s.list.filter((x) => x.id !== id);
+    delete s.serviceSecrets[id];
+    await saveServices(who.orgId, s, who.userId, 'integration.review_service_removed', { id });
+    return c.body(null, 204);
+  });
+
+  routes.post('/integrations/review-services/:id/test', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const missing = await needKey(c);
+    if (missing) return missing;
+    const s = await services(who.orgId);
+    const service = s.list.find((x) => x.id === c.req.param('id'));
+    if (!service) return c.json({ error: 'Not found' }, 404);
+    const secret = s.serviceSecrets[service.id];
+    if (!secret) return c.json({ error: 'This service has no signing secret. Create a new one first.' }, 422);
+    const ping = { type: 'ping', event_id: `ping:${crypto.randomUUID()}`, created_at: new Date(now()).toISOString(), organization: { id: who.orgId }, service: { id: service.id } };
+    const started = Date.now();
+    try {
+      const res = await sendSigned(o.fetchImpl ?? fetch, service, secret, ping, now(), 10_000);
+      // The response body is never passed on.
+      return c.json({ ok: res.ok, status: res.status, ms: Date.now() - started, ...(res.ok ? {} : { error: `The service answered ${res.status}` }) });
+    } catch (error) {
+      const timeout = error instanceof Error && error.name === 'TimeoutError';
+      return c.json({ ok: false, status: null, ms: Date.now() - started, error: timeout ? 'The service did not answer within 10 seconds' : 'The service could not be reached' });
+    }
+  });
+
+  routes.get('/integrations/review-services/:id/deliveries', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const s = await services(who.orgId);
+    const id = c.req.param('id');
+    if (!s.list.some((x) => x.id === id)) return c.json({ error: 'Not found' }, 404);
+    return c.json(await o.store.deliveries(who.orgId, id, 20));
+  });
+
+  // Names only, for everyone who sees reviews (no addresses, no secrets).
+  routes.get('/review-services', async (c) => {
+    const who = await caller(c, ALL_ROLES);
+    if (who instanceof Response) return who;
+    const { services: list } = await o.settings.forOrg(who.orgId);
+    return c.json(list.map((x) => ({ id: x.id, name: x.name })));
+  });
+
+  // ---------------------------------------------------------------------------
+  // Called by review services, signed with the service's own secret
+  // ---------------------------------------------------------------------------
+
+  /** The stage and the secret of its service, or null for anything unknown. */
+  async function stageSecret(orgId: unknown, stageId: string) {
+    if (typeof orgId !== 'string' || !UUID.test(orgId)) return null;
+    const stage = await o.store.stage(orgId, stageId);
+    if (!stage?.external) return null;
+    const resolved = await o.settings.forOrg(orgId);
+    const serviceId = stage.external_service ?? 'default';
+    const secret = resolved.serviceSecret(serviceId);
+    return secret ? { stage, secret, resolved, serviceId } : null;
   }
   const unauthorized = (c: Context) => c.json({ error: 'Invalid or missing signature' }, 401);
 
@@ -200,10 +494,9 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
     } catch {
       return c.json({ error: 'Expected JSON' }, 400);
     }
-    const orgId = (json as { org_id?: unknown } | null)?.org_id;
-    const secret = typeof orgId === 'string' ? await externalSecret(orgId) : null;
-    // Same answer for an unknown organization and a wrong signature.
-    if (!secret || (await verifySignature(secret, c.req.header('x-signature'), raw, now())) !== 'ok') return unauthorized(c);
+    const found = await stageSecret((json as { org_id?: unknown } | null)?.org_id, stageId);
+    // The same answer for an unknown organization or stage and a wrong signature.
+    if (!found || (await verifySignature(found.secret, c.req.header('x-signature'), raw, now())) !== 'ok') return unauthorized(c);
     const parsed = parseExternalStatusUpdate(json);
     if ('error' in parsed) return c.json({ error: parsed.error }, 422);
     const u = parsed.update;
@@ -223,19 +516,26 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
 
   routes.get('/external/stages/:stageId', async (c) => {
     const stageId = c.req.param('stageId');
-    const orgId = c.req.query('org_id') ?? '';
     if (!UUID.test(stageId)) return c.json({ error: 'Not found' }, 404);
-    const secret = await externalSecret(orgId);
-    if (!secret || (await verifySignature(secret, c.req.header('x-signature'), '', now())) !== 'ok') return unauthorized(c);
-    const stage = await o.store.stage(orgId, stageId);
-    if (!stage?.external) return c.json({ error: 'Not found' }, 404);
-    const [request] = await o.store.requests([stage.request_id]);
+    const orgId = c.req.query('org_id') ?? '';
+    const found = await stageSecret(orgId, stageId);
+    if (!found || (await verifySignature(found.secret, c.req.header('x-signature'), '', now())) !== 'ok') return unauthorized(c);
+    const [request] = await o.store.requests([found.stage.request_id]);
     if (!request) return c.json({ error: 'Not found' }, 404);
-    const record = await o.store.getIntegration(orgId);
+    const service = found.resolved.services.find((x) => x.id === found.serviceId);
+    // The full data, also for services in pull mode: this is how they read it.
     return c.json({
-      ...stageStartedPayload(request, stage, { sendAllAnswers: !!record?.config.external?.sendAllAnswers, publicApiUrl: o.publicApiUrl }),
-      stage_status: stage.status,
+      ...stageStartedPayload(request, found.stage, { sendAllAnswers: !!service?.sendAllAnswers, publicApiUrl: found.resolved.publicApiUrl ?? o.publicApiUrl }),
+      data_mode: service?.dataMode ?? 'push',
+      service: { id: found.serviceId },
+      stage_status: found.stage.status,
     });
+  });
+
+  // Machine-readable description of the whole exchange.
+  routes.get('/external/spec', (c) => {
+    c.header('Cache-Control', 'public, max-age=3600');
+    return c.json(externalReviewSpec(o.publicApiUrl));
   });
 
   // ---------------------------------------------------------------------------

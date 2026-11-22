@@ -28,6 +28,8 @@ export interface StageSettings {
   checklist: string[];
   /** 'external': the review happens in another service; this app sends the data and shows its status. */
   handledBy: 'here' | 'external';
+  /** With 'external': the id of the review service (Admin → Integrations) that handles it. */
+  serviceId: string | null;
   /** How to review, written by the organization; shown to reviewers in the Guide tab. */
   guide: string;
 }
@@ -104,6 +106,7 @@ function fromRule(rule: StageRule): StageSettings {
     slaBusinessDays: rule.slaBusinessDays,
     checklist: [...rule.checklist],
     handledBy: 'here',
+    serviceId: null,
     guide: DEFAULT_REVIEW_GUIDES[rule.name] ?? '',
   };
 }
@@ -125,7 +128,7 @@ export function parseWorkflowSettings(input: unknown): { settings: WorkflowSetti
   for (const stage of DEFAULT_STAGES) {
     const s = raw[stage] as Partial<StageSettings> | undefined;
     if (!s || typeof s !== 'object') return { error: `Settings for ${stage} are missing` };
-    const known = new Set(['requirement', 'minTier', 'onlyWhen', 'slaBusinessDays', 'checklist', 'handledBy', 'guide']);
+    const known = new Set(['requirement', 'minTier', 'onlyWhen', 'slaBusinessDays', 'checklist', 'handledBy', 'serviceId', 'guide']);
     const unknown = Object.keys(s).find((k) => !known.has(k));
     if (unknown) return { error: `${stage} has an unknown setting “${unknown}”` };
     if (!(STAGE_REQUIREMENTS as readonly unknown[]).includes(s.requirement)) return { error: `${stage}: choose when the review is needed` };
@@ -155,7 +158,21 @@ export function parseWorkflowSettings(input: unknown): { settings: WorkflowSetti
     if (handledBy !== 'here' && handledBy !== 'external') return { error: `${stage}: choose where the review happens` };
     const guide = s.guide === undefined ? (DEFAULT_REVIEW_GUIDES[stage] ?? '') : s.guide;
     if (typeof guide !== 'string' || guide.length > STAGE_LIMITS.guide) return { error: `${stage}: the guide is longer than ${STAGE_LIMITS.guide} characters` };
-    settings[stage] = { requirement: s.requirement as StageRequirement, minTier: s.minTier as RaisedTier, onlyWhen, slaBusinessDays: sla as number, checklist, handledBy, guide: guide.trim() };
+    // Settings saved before services existed use the organization's first ("default") service.
+    const serviceId = s.serviceId ?? (handledBy === 'external' ? 'default' : null);
+    if (serviceId !== null && (typeof serviceId !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(serviceId))) {
+      return { error: `${stage}: choose the review service` };
+    }
+    settings[stage] = {
+      requirement: s.requirement as StageRequirement,
+      minTier: s.minTier as RaisedTier,
+      onlyWhen,
+      slaBusinessDays: sla as number,
+      checklist,
+      handledBy,
+      serviceId: handledBy === 'external' ? serviceId : null,
+      guide: guide.trim(),
+    };
   }
   // Every request needs at least one review, or it would never get a decision.
   if (!Object.values(settings).some((s) => s.requirement === 'always' && s.onlyWhen === null)) {
@@ -180,7 +197,7 @@ export function workflowFromSettings(stored: unknown): WorkflowConfig {
         slaBusinessDays: s.slaBusinessDays,
         checklist: s.checklist,
         focusFields: rule.focusFields,
-        ...(s.handledBy === 'external' ? { external: true } : {}),
+        ...(s.handledBy === 'external' ? { external: true, externalService: s.serviceId ?? 'default' } : {}),
       };
     }),
   };

@@ -1,3 +1,4 @@
+import type { ReviewService } from '@app/shared';
 import type { SupabaseConfig } from './supabaseStore';
 
 // Service-role access to the integration tables (integration_settings, outbound_events,
@@ -7,16 +8,36 @@ import type { SupabaseConfig } from './supabaseStore';
 export const SLACK_EVENTS = ['request.submitted', 'request.approved', 'request.rejected', 'stage.decided', 'exception.requested', 'info_request.asked'] as const;
 export type SlackEvent = (typeof SLACK_EVENTS)[number];
 
+export const EMAIL_PROVIDERS = ['off', 'resend', 'smtp', 'log'] as const;
+export type EmailProviderName = (typeof EMAIL_PROVIDERS)[number];
+export const AI_PROVIDERS = ['off', 'parallel'] as const;
+export type AiProviderName = (typeof AI_PROVIDERS)[number];
+export const AI_PROCESSORS = ['lite', 'base', 'core'] as const;
+export type AiProcessor = (typeof AI_PROCESSORS)[number];
+
+/** Non-secret settings saved in the UI. A section that is absent falls back to the environment. */
 export interface IntegrationConfig {
   slack?: { enabled: boolean; events: SlackEvent[] };
   upguard?: { enabled: boolean };
+  /** Legacy single external service; read as the review service with id "default". */
   external?: { enabled: boolean; name: string; outboundUrl: string; sendAllAnswers: boolean };
+  reviewServices?: ReviewService[];
+  server?: { publicApiUrl: string };
+  email?: { provider: EmailProviderName; from: string };
+  ai?: { provider: AiProviderName; processor: AiProcessor };
 }
 
+/** Saved encrypted, as one JSON object. */
 export interface IntegrationSecrets {
   slackWebhookUrl?: string;
   upguardApiKey?: string;
+  /** Legacy secret of the "default" service. */
   externalSecret?: string;
+  /** Signing secret of each review service, by service id. */
+  serviceSecrets?: Record<string, string>;
+  resendApiKey?: string;
+  smtpUrl?: string;
+  parallelApiKey?: string;
 }
 
 export interface IntegrationRecord {
@@ -64,6 +85,19 @@ export interface StageInfo {
   status: string;
   sla_due_at: string | null;
   external: boolean;
+  /** Review service id; null on stages saved before services existed (read as "default"). */
+  external_service?: string | null;
+}
+
+export interface DeliveryRow {
+  id: number;
+  type: string | null;
+  created_at: string;
+  attempts: number;
+  delivered_at: string | null;
+  failed_at: string | null;
+  last_error: string | null;
+  next_attempt_at: string;
 }
 
 export interface VendorRiskRow {
@@ -102,6 +136,8 @@ export interface IntegrationStore {
   stage(orgId: string, stageId: string): Promise<StageInfo | null>;
   externalStages(requestId: string): Promise<StageInfo[]>;
   saveVendorRisk(row: { org_id: string; request_id: string; hostname: string; data: Record<string, unknown>; fetched_by: string }): Promise<VendorRiskRow>;
+  /** The latest events queued for one review service. */
+  deliveries(orgId: string, serviceId: string, limit: number): Promise<DeliveryRow[]>;
 }
 
 export class ExternalUpdateRejected extends Error {}
@@ -225,11 +261,11 @@ export function supabaseIntegrationStore(config: SupabaseConfig, fetchImpl: type
       });
     },
     async stage(orgId, stageId) {
-      const rows = await call<StageInfo[]>('reading a stage', `/request_stages${q({ id: `eq.${stageId}`, org_id: `eq.${orgId}`, select: 'id,org_id,request_id,name,status,sla_due_at,external' })}`);
+      const rows = await call<StageInfo[]>('reading a stage', `/request_stages${q({ id: `eq.${stageId}`, org_id: `eq.${orgId}`, select: 'id,org_id,request_id,name,status,sla_due_at,external,external_service' })}`);
       return rows[0] ?? null;
     },
     async externalStages(requestId) {
-      return call<StageInfo[]>('reading stages', `/request_stages${q({ request_id: `eq.${requestId}`, external: 'eq.true', select: 'id,org_id,request_id,name,status,sla_due_at,external' })}`);
+      return call<StageInfo[]>('reading stages', `/request_stages${q({ request_id: `eq.${requestId}`, external: 'eq.true', select: 'id,org_id,request_id,name,status,sla_due_at,external,external_service' })}`);
     },
     async saveVendorRisk(row) {
       const rows = await call<VendorRiskRow[]>('saving a vendor rating', '/vendor_risk_checks', {
@@ -238,6 +274,19 @@ export function supabaseIntegrationStore(config: SupabaseConfig, fetchImpl: type
         body: JSON.stringify({ ...row, source: 'upguard' }),
       });
       return rows[0]!;
+    },
+    async deliveries(orgId, serviceId, limit) {
+      return call<DeliveryRow[]>(
+        'reading deliveries',
+        `/outbound_events${q({
+          org_id: `eq.${orgId}`,
+          kind: 'eq.external',
+          'payload->service->>id': `eq.${serviceId}`,
+          select: 'id,type:payload->>type,created_at,attempts,delivered_at,failed_at,last_error,next_attempt_at',
+          order: 'id.desc',
+          limit: String(limit),
+        })}`,
+      );
     },
   };
 }

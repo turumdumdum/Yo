@@ -14,6 +14,7 @@ import {
   type OpenQuestion,
   type RequestRow,
   type RequestSummary,
+  listReviewServiceNames,
 } from './api';
 import { HowItWorks } from './HowItWorks';
 import { RequestList } from './RequestList';
@@ -96,7 +97,19 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
       cancelled = true;
     };
   }, [supabase, organization.id]);
-  const context: ReviewContext = { userId: user.id, isManager, allowSelfReview: organization.allow_self_review, members, guides };
+  // Names of review services, to show which service handles an external review.
+  const [reviewServices, setReviewServices] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let cancelled = false;
+    listReviewServiceNames(supabase).then(
+      (rows) => !cancelled && setReviewServices(Object.fromEntries(rows.map((r) => [r.id, r.name]))),
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+  const context: ReviewContext = { userId: user.id, isManager, allowSelfReview: organization.allow_self_review, members, guides, reviewServices };
 
   async function openRequest(id: string, stageId?: string) {
     setBusy(true);

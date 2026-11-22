@@ -32,7 +32,7 @@ Open-source vendor intake and due-diligence service. A requester submits a reque
 | `apps/web` | React + Vite app |
 | `deploy/`, `ee/` | Placeholders |
 
-Not built yet: email notifications about requests (invitations are emailed; see `apps/api/.env.example`), password recovery, Google sign-in, vendor registry, evidence expiry, malware scanning of uploads, self-host Docker Compose. The API has no general rate limiting yet.
+Not built yet: email notifications about requests (invitations are emailed; Slack notifications exist), password recovery, Google sign-in, vendor registry, evidence expiry, malware scanning of uploads, self-host Docker Compose.
 
 ## Repository layout
 
@@ -60,6 +60,19 @@ pnpm test          # unit tests (shared, api, web)
 ```
 
 The web app only ever receives the publishable key. The secret (service role) key belongs in `apps/api/.env` and must never be committed or given a `VITE_` name.
+
+#### Environment: only what is needed to start
+
+| Variable | Where | Required |
+| --- | --- | --- |
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | `apps/api/.env` (and the `VITE_` versions in `apps/web/.env`) | Yes |
+| `SUPABASE_SERVICE_ROLE_KEY` | `apps/api/.env` only | Yes |
+| `WEB_ORIGIN` | `apps/api/.env` | Yes |
+| `INTEGRATION_ENCRYPTION_KEY` | `apps/api/.env` | Created by the Node API on first start. **Back it up**: without it the stored integration secrets cannot be read. On Cloudflare Workers set it as a secret yourself |
+
+Everything else (server address, email, AI, Slack, UpGuard, review services) is entered in **Admin → Integrations**. The older variables (`EMAIL_PROVIDER`, `AI_PROVIDER`, `PUBLIC_API_URL`, …) still work as defaults when nothing is set in the UI.
+
+See [docs/FEATURES.md](docs/FEATURES.md) for what the product does and [docs/external-review.md](docs/external-review.md) to connect a review service.
 
 ### Database tests
 

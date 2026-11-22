@@ -72,3 +72,8 @@ export async function verifySignature(secret: string, header: string | undefined
 export function randomSecret(): string {
   return toHex(crypto.getRandomValues(new Uint8Array(32)).buffer);
 }
+
+/** 32 random bytes, base64url: a signing secret for a review service. */
+export function randomSecretB64url(): string {
+  return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}

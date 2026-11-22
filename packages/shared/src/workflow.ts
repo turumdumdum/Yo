@@ -24,6 +24,8 @@ export interface StageRule {
   focusFields: readonly string[];
   /** The review happens in an external service; this app only tracks its status. */
   external?: boolean;
+  /** Id of the review service that handles it (see reviewServices.ts). */
+  externalService?: string;
 }
 
 export interface WorkflowConfig {
@@ -107,6 +109,8 @@ export interface PlannedStage {
   reviewRules: ReviewRule[];
   /** Reviewed in an external service: no checklist or form here, the status arrives through the API. */
   external: boolean;
+  /** Id of that service; null when reviewed here. */
+  externalService: string | null;
 }
 
 export const STAGE_DECISIONS = ['Approved', 'Approved with conditions', 'Rejected'] as const;
@@ -163,7 +167,7 @@ export function planStages(
       }
     }
     if (note) {
-      return { name: rule.name, status: 'Not required', slaBusinessDays: null, slaDueAt: null, note, checklist: [], reviewFields: [], reviewRules: [], external: false };
+      return { name: rule.name, status: 'Not required', slaBusinessDays: null, slaDueAt: null, note, checklist: [], reviewFields: [], reviewRules: [], external: false, externalService: null };
     }
     if (rule.external) {
       return {
@@ -176,6 +180,7 @@ export function planStages(
         reviewFields: [],
         reviewRules: [],
         external: true,
+        externalService: rule.externalService ?? 'default',
       };
     }
     const form = reviewTemplates[rule.name] ?? defaultReviewTemplate(rule.name);
@@ -189,6 +194,7 @@ export function planStages(
       reviewFields: form.fields,
       reviewRules: form.rules,
       external: false,
+      externalService: null,
     };
   });
 }

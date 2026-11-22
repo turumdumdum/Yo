@@ -69,7 +69,7 @@ describe('POST /v1/invitations', () => {
     });
     const off = setup({ mailer: null });
     const res = (await (await off.call({ invitations: [{ email: 'bob@acme.example', role: 'reviewer' }] })).json()) as { results: unknown[] };
-    expect(res.results[0]).toMatchObject({ emailed: false, emailError: 'Email is not set up on this server', link: 'https://app.example/?invite=tok0' });
+    expect(res.results[0]).toMatchObject({ emailed: false, emailError: 'Email is not set up. An admin can set it up in Admin → Integrations.', link: 'https://app.example/?invite=tok0' });
     expect(await (await off.app.request('/v1/invitations/email-status')).json()).toEqual({ enabled: false });
   });
 

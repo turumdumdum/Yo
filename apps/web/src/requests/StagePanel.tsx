@@ -20,6 +20,8 @@ export interface ReviewContext {
   guides?: Record<string, string>;
   /** Display name of the external review service, when one is connected. */
   externalServiceName?: string;
+  /** Names of the organization's review services by id. */
+  reviewServices?: Record<string, string>;
 }
 
 interface Props {
@@ -224,7 +226,7 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
   ];
 
   if (external) {
-    const service = context.externalServiceName || 'an external service';
+    const service = (stage.external_service && context.reviewServices?.[stage.external_service]) || context.externalServiceName || 'an external service';
     return (
       <div className="stage-panel external-stage">
         <p>
