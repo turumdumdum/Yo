@@ -1,0 +1,11 @@
+# Keep secrets, local state and build output out of Docker images.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+.git
+deploy/.env
+deploy/data
+coverage
+*.log

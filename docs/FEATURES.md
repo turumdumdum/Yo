@@ -155,5 +155,5 @@ A Postgres-based queue (`outbound_events`) holds calls to other services. The AP
 - Email notifications about requests (only invitations are emailed).
 - Google sign-in, password recovery, SAML/SCIM.
 - Jira and Asana sync, public API beyond the external review endpoints.
-- Malware scanning of uploads; self-host Docker Compose; external penetration test.
+- Malware scanning of uploads; external penetration test.
 - UpGuard: verify endpoint and response fields against UpGuard's current documentation.

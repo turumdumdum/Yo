@@ -49,6 +49,7 @@ export function optionsFromEnv(env: Env, platform: { smtpFactory?: SmtpFactory }
     url: required('SUPABASE_URL'),
     publishableKey: required('SUPABASE_PUBLISHABLE_KEY'),
     serviceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
+    publicUrl: env.SUPABASE_PUBLIC_URL || undefined,
   };
   const store = supabaseRequestStore(supabase);
 
@@ -65,6 +66,8 @@ export function optionsFromEnv(env: Env, platform: { smtpFactory?: SmtpFactory }
 
   return {
     ai,
+    // A separate secret from the same key, so AI run handles are valid on every instance.
+    aiRunSecret: env.INTEGRATION_ENCRYPTION_KEY ? `ai-run-handles:${env.INTEGRATION_ENCRYPTION_KEY.trim()}` : undefined,
     webOrigin,
     outbox,
     integrations: {

@@ -4,6 +4,7 @@ import { createApp } from '../app';
 import { optionsFromEnv } from '../config';
 import type { DraftRecord, RequestStore } from '../requests';
 import { answerCheckTask, remarksFromResult, suggestionsFromResult, vendorLookupTask } from './assist';
+import { signHandle } from './handle';
 import { parallelProvider } from './parallel';
 import { AiProviderError, type AiProvider, type AiTask, type AiTaskResult } from './provider';
 
@@ -363,5 +364,157 @@ describe('configuration', () => {
     expect(optionsFromEnv({ ...base, AI_PROVIDER: 'parallel', PARALLEL_API_KEY: 'k' }).ai?.name).toBe('Parallel');
     expect(() => optionsFromEnv({ ...base, AI_PROVIDER: 'parallel' })).toThrow(/PARALLEL_API_KEY/);
     expect(() => optionsFromEnv({ ...base, AI_PROVIDER: 'skynet' })).toThrow(/Unknown AI_PROVIDER/);
+  });
+});
+
+describe('background AI runs', () => {
+  const draft: DraftRecord = { id: ID, org_id: ID, status: 'draft', answers };
+  const OTHER = '99999999-2222-4333-8444-555555555555';
+  // An unsigned JWT-shaped token: only its `sub` is read, to bind the handle to a person.
+  const tokenFor = (sub: string) => `x.${btoa(JSON.stringify({ sub })).replace(/=+$/, '')}.y`;
+  const SECRET = 'test-run-secret';
+
+  function asyncProvider(polls: (AiTaskResult | null)[]) {
+    const started: AiTask[] = [];
+    const asked: string[] = [];
+    const provider: AiProvider = {
+      name: 'Slow',
+      async run() {
+        throw new Error('not used');
+      },
+      async start(task) {
+        started.push(task);
+        return { runId: 'run_secret_1' };
+      },
+      async result(runId) {
+        asked.push(runId);
+        return polls.shift() ?? null;
+      },
+    };
+    return { provider, started, asked };
+  }
+
+  function app(provider: AiProvider, record: DraftRecord | null = draft) {
+    const store: RequestStore = {
+      async getReviewTemplates() {
+        return {};
+      },
+      async getAsUser() {
+        return record;
+      },
+      async submit() {
+        throw new Error('not used');
+      },
+    };
+    const a = createApp({ requests: store, ai: provider, aiRunSecret: SECRET });
+    const headers = (sub = 'user-a') => ({ authorization: `Bearer ${tokenFor(sub)}` });
+    return {
+      start: (kind: string, sub?: string) => a.request(`/v1/requests/${ID}/ai/${kind}`, { method: 'POST', headers: headers(sub) }),
+      poll: (handle: string, sub?: string, id = ID) => a.request(`/v1/requests/${id}/ai/runs/${encodeURIComponent(handle)}`, { headers: headers(sub) }),
+    };
+  }
+
+  it('answers at once with a handle, then reports running and finally the remarks', async () => {
+    const done: AiTaskResult = { content: { remarks: [{ field: '', severity: 'info', message: 'Looks thin' }] }, basis: [] };
+    const { provider, started, asked } = asyncProvider([null, done]);
+    const { start, poll } = app(provider);
+    const res = await start('check');
+    expect(res.status).toBe(202);
+    const { handle } = (await res.json()) as { handle: string };
+    // The provider's run id is never handed out in the clear.
+    expect(handle).not.toContain('run_secret_1');
+    // The answer check is a quick consistency check.
+    expect(started[0]!.processor).toBe('lite');
+    const first = await poll(handle);
+    expect(first.status).toBe(202);
+    expect(await first.json()).toEqual({ status: 'running' });
+    const second = await poll(handle);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ remarks: [{ field: null, severity: 'info', message: 'Looks thin' }] });
+    expect(asked).toEqual(['run_secret_1', 'run_secret_1']);
+  });
+
+  it('returns suggestions for a vendor lookup with the configured processor', async () => {
+    const { provider, started } = asyncProvider([{ content: { vendorLegalEntity: 'Acme Inc.' }, basis: [] }]);
+    const { start, poll } = app(provider);
+    const { handle } = (await (await start('suggestions')).json()) as { handle: string };
+    expect(started[0]!.processor).toBeUndefined();
+    expect(await (await poll(handle)).json()).toEqual({ suggestions: [{ field: 'vendorLegalEntity', value: 'Acme Inc.', reason: '', sources: [] }] });
+  });
+
+  it('refuses tampered, foreign, expired and other-request handles without asking the provider', async () => {
+    const { provider, asked } = asyncProvider([]);
+    const { start, poll } = app(provider);
+    const { handle } = (await (await start('check')).json()) as { handle: string };
+    const [payload, mac] = handle.split('.');
+    const flipped = `${payload}.${mac!.slice(0, -1)}${mac!.endsWith('0') ? '1' : '0'}`;
+    expect((await poll(flipped)).status).toBe(404);
+    expect((await poll('not-a-handle')).status).toBe(404);
+    // Someone else with access to the same draft cannot use my handle.
+    expect((await poll(handle, 'user-b')).status).toBe(404);
+    // A handle for one request does not work for another.
+    const other = await signHandle(SECRET, { runId: 'r', requestId: OTHER, kind: 'check', subject: 'user-a', expires: 9_999_999_999 });
+    expect((await poll(other)).status).toBe(404);
+    const expired = await signHandle(SECRET, { runId: 'r', requestId: ID, kind: 'check', subject: 'user-a', expires: 1 });
+    expect((await poll(expired)).status).toBe(404);
+    const forged = await signHandle('another-secret', { runId: 'r', requestId: ID, kind: 'check', subject: 'user-a', expires: 9_999_999_999 });
+    expect((await poll(forged)).status).toBe(404);
+    expect(asked).toEqual([]);
+  });
+
+  it('checks access to the draft on every poll', async () => {
+    const { provider, asked } = asyncProvider([]);
+    const { handle } = (await (await app(provider).start('check')).json()) as { handle: string };
+    expect((await app(provider, null).poll(handle)).status).toBe(404);
+    expect((await app(provider, { ...draft, status: 'in_review' }).poll(handle)).status).toBe(409);
+    expect(asked).toEqual([]);
+  });
+
+  it('still limits how often a request can start a run', async () => {
+    const { provider, started } = asyncProvider([]);
+    const { start } = app(provider);
+    expect((await start('check')).status).toBe(202);
+    expect((await start('check')).status).toBe(429);
+    expect(started).toHaveLength(1);
+  });
+
+  it('reports a provider failure while polling', async () => {
+    const provider: AiProvider = {
+      name: 'Slow',
+      async run() {
+        throw new Error('not used');
+      },
+      async start() {
+        return { runId: 'r' };
+      },
+      async result() {
+        throw new AiProviderError('The AI provider could not complete the task');
+      },
+    };
+    const { start, poll } = app(provider);
+    const { handle } = (await (await start('check')).json()) as { handle: string };
+    const res = await poll(handle);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: 'The AI provider could not complete the task' });
+  });
+});
+
+describe('parallelProvider background runs', () => {
+  it('starts with the task processor and maps a 408 to "still running"', async () => {
+    const calls: { url: string; body?: string }[] = [];
+    const responses = [
+      { status: 202, body: { run_id: 'run_9', status: 'queued' } },
+      { status: 408, body: {} },
+    ];
+    const impl = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), body: init?.body as string | undefined });
+      const next = responses.shift()!;
+      return new Response(JSON.stringify(next.body), { status: next.status });
+    }) as typeof fetch;
+    const p = parallelProvider({ apiKey: 'k', processor: 'core' }, impl);
+    expect(await p.start!({ instructions: 'i', input: {}, outputSchema: {}, processor: 'lite' })).toEqual({ runId: 'run_9' });
+    expect(JSON.parse(calls[0]!.body!).processor).toBe('lite');
+    expect(await p.result!('run_9', 20)).toBeNull();
+    expect(calls[1]!.url).toBe('https://api.parallel.ai/v1/tasks/runs/run_9/result?timeout=20');
   });
 });

@@ -1,5 +1,5 @@
 import { allFields, fieldLabel, formatAnswer, stepOfField, type AiRemark, type AiSuggestion, type Answers, type RequestFormDefinition } from '@app/shared';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
@@ -41,24 +41,37 @@ export function AiAssist({ supabase, requestId, provider, mode, form, answers, s
     return () => clearInterval(timer);
   }, [busy]);
 
+  // Stop polling when the form closes; the job itself finishes on the provider's side.
+  const running = useRef<AbortController | null>(null);
+  useEffect(() => () => running.current?.abort(), []);
+
   async function ask() {
+    running.current?.abort();
+    const controller = new AbortController();
+    running.current = controller;
     setBusy(true);
     setError(null);
     try {
       if (!(await save())) throw new Error('Could not save your answers. Check your connection and try again.');
+      const options = { signal: controller.signal };
       if (mode === 'suggest') {
-        const found = await aiSuggestions(supabase, requestId);
+        const found = await aiSuggestions(supabase, requestId, options);
+        if (controller.signal.aborted) return;
         setSuggestions(found);
         onSuggestions?.(found);
-      }
-      else {
+      } else {
         setFixState({});
-        setRemarks(await aiCheck(supabase, requestId));
+        const found = await aiCheck(supabase, requestId, options);
+        if (controller.signal.aborted) return;
+        setRemarks(found);
       }
     } catch (e) {
-      setError(errorMessage(e));
+      if (!controller.signal.aborted) setError(errorMessage(e));
     } finally {
-      setBusy(false);
+      if (running.current === controller) {
+        running.current = null;
+        setBusy(false);
+      }
     }
   }
 
@@ -86,8 +99,12 @@ export function AiAssist({ supabase, requestId, provider, mode, form, answers, s
         {suggest
           ? `Optional. Sends the service name, vendor and website to ${provider} and proposes values you can accept or ignore.`
           : `Optional. Sends your answers, without the names of owners, to ${provider}. You decide which proposed fixes to accept.`}
-        {busy && ' This can take up to two minutes; you can keep filling in the form meanwhile.'}
       </p>
+      {busy && (
+        <p className="field-hint" role="status">
+          {seconds < 20 ? 'Working on it…' : 'Still checking… this can take a minute or two.'} You can keep filling in the form meanwhile.
+        </p>
+      )}
       <FormError message={error} />
 
       <div role="status">

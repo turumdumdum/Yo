@@ -21,6 +21,8 @@ export interface AppOptions {
   requests?: RequestStore;
   /** Optional AI plugin. Off unless configured; the core works without it. */
   ai?: AiProvider;
+  /** Signs AI run handles; derived from INTEGRATION_ENCRYPTION_KEY so every instance accepts them. */
+  aiRunSecret?: string;
   admin?: AdminStore;
   attachments?: AttachmentStore;
   invitations?: InvitationStore;
@@ -75,6 +77,7 @@ export function createApp(options: AppOptions = {}) {
         options.requests,
         options.ai,
         settings && admin ? { providerFor: async (orgId) => (await settings.forOrg(orgId)).ai, orgOf: async (t) => (await admin.getCaller(t))?.orgId ?? null } : undefined,
+        { runSecret: options.aiRunSecret },
       ),
     );
   }

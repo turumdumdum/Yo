@@ -32,7 +32,7 @@ Open-source vendor intake and due-diligence service. A requester submits a reque
 | `apps/web` | React + Vite app |
 | `deploy/`, `ee/` | Placeholders |
 
-Not built yet: email notifications about requests (invitations are emailed; Slack notifications exist), password recovery, Google sign-in, vendor registry, evidence expiry, malware scanning of uploads, self-host Docker Compose.
+Not built yet: email notifications about requests (invitations are emailed; Slack notifications exist), password recovery, Google sign-in, vendor registry, evidence expiry, malware scanning of uploads.
 
 ## Repository layout
 
@@ -42,7 +42,7 @@ apps/api/          TypeScript API (Workers + Node entrypoints)
 packages/shared/   types, validation schemas, rule engine
 supabase/          migrations, RLS policies, tests
 ee/                commercial add-ons (empty for now, own LICENSE)
-deploy/            self-host deployment (placeholder)
+deploy/            self-host with Docker Compose (see docs/self-host.md)
 docs/              architecture notes, self-host guide
 ```
 

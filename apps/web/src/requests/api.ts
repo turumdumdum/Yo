@@ -292,8 +292,52 @@ export async function submitRequest(supabase: SupabaseClient, id: string): Promi
 
 const AI_OFF: AiStatus = { enabled: false, provider: null };
 
-/** The API gives up on the provider after about two minutes; the browser waits a little longer. */
-const AI_TIMEOUT_MS = 150_000;
+/** Starting a job and each poll are short requests; a poll waits up to ~20 s on the server. */
+const AI_REQUEST_TIMEOUT_MS = 45_000;
+/** How long the browser keeps asking before it gives up on a job. */
+const AI_MAX_WAIT_MS = 6 * 60_000;
+const AI_POLL_PAUSE_MS = 2_000;
+
+export interface AiRunOptions {
+  /** Stops polling, for example when the form closes. */
+  signal?: AbortSignal;
+  /** Seconds since the job started, after every poll. */
+  onProgress?: (elapsedSeconds: number) => void;
+}
+
+const aborted = () => new SubmitError('The AI request was cancelled.');
+
+/**
+ * Starts an AI job and waits for it. The API answers 202 with a handle for slow
+ * providers, and the browser polls; an older API that answers 200 at once works too.
+ */
+async function runAi<T>(supabase: SupabaseClient, id: string, kind: 'check' | 'suggestions', fallback: string, options: AiRunOptions): Promise<T> {
+  const startedAt = Date.now();
+  let res = await callApi(supabase, `/v1/requests/${id}/ai/${kind}`, 'POST', AI_REQUEST_TIMEOUT_MS);
+  if (res.status !== 202) {
+    if (!res.ok) throw await apiError(res, fallback);
+    return (await res.json()) as T;
+  }
+  const { handle } = (await res.json()) as { handle?: string };
+  if (!handle) throw new SubmitError(fallback);
+  while (Date.now() - startedAt < AI_MAX_WAIT_MS) {
+    if (options.signal?.aborted) throw aborted();
+    res = await callApi(supabase, `/v1/requests/${id}/ai/runs/${encodeURIComponent(handle)}`, 'GET', AI_REQUEST_TIMEOUT_MS);
+    options.onProgress?.(Math.round((Date.now() - startedAt) / 1000));
+    if (res.status !== 202) {
+      if (!res.ok) throw await apiError(res, fallback);
+      return (await res.json()) as T;
+    }
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, AI_POLL_PAUSE_MS);
+      options.signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        resolve();
+      }, { once: true });
+    });
+  }
+  throw new SubmitError('The AI did not finish within 6 minutes. Try again, or ask an admin to choose the faster "lite" processor in Admin → Integrations.');
+}
 
 /** Whether the optional AI plugin is configured. Any failure simply means "no AI". */
 export async function aiStatus(supabase: SupabaseClient): Promise<AiStatus> {
@@ -305,16 +349,12 @@ export async function aiStatus(supabase: SupabaseClient): Promise<AiStatus> {
   }
 }
 
-export async function aiSuggestions(supabase: SupabaseClient, id: string): Promise<AiSuggestion[]> {
-  const res = await callApi(supabase, `/v1/requests/${id}/ai/suggestions`, 'POST', AI_TIMEOUT_MS);
-  if (!res.ok) throw await apiError(res, 'The AI could not suggest anything.');
-  return ((await res.json()) as { suggestions: AiSuggestion[] }).suggestions;
+export async function aiSuggestions(supabase: SupabaseClient, id: string, options: AiRunOptions = {}): Promise<AiSuggestion[]> {
+  return (await runAi<{ suggestions: AiSuggestion[] }>(supabase, id, 'suggestions', 'The AI could not suggest anything.', options)).suggestions;
 }
 
-export async function aiCheck(supabase: SupabaseClient, id: string): Promise<AiRemark[]> {
-  const res = await callApi(supabase, `/v1/requests/${id}/ai/check`, 'POST', AI_TIMEOUT_MS);
-  if (!res.ok) throw await apiError(res, 'The AI could not check the answers.');
-  return ((await res.json()) as { remarks: AiRemark[] }).remarks;
+export async function aiCheck(supabase: SupabaseClient, id: string, options: AiRunOptions = {}): Promise<AiRemark[]> {
+  return (await runAi<{ remarks: AiRemark[] }>(supabase, id, 'check', 'The AI could not check the answers.', options)).remarks;
 }
 
 /** Saves a stage's review form through the API, which validates it with the shared schema. */

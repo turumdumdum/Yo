@@ -168,6 +168,8 @@ export function answerCheckTask(
   return {
     instructions,
     input: { answers: sent },
+    // A consistency check of the answers, not web research: the fastest tier is enough.
+    processor: 'lite',
     outputSchema: {
       type: 'object',
       additionalProperties: false,

@@ -13,6 +13,8 @@ export interface AiTask {
   input: Record<string, unknown>;
   /** JSON Schema of the expected output object. */
   outputSchema: Record<string, unknown>;
+  /** Provider tier for this task, when it needs a different speed than the configured one. */
+  processor?: string;
 }
 
 export interface AiFieldBasis {
@@ -31,6 +33,13 @@ export interface AiProvider {
   /** Name shown to users, so they know where their data goes. */
   readonly name: string;
   run(task: AiTask): Promise<AiTaskResult>;
+  /**
+   * Optional asynchronous pair. A provider that has them lets the API answer at once and
+   * the browser poll, so slow research tiers never hit an HTTP timeout.
+   */
+  start?(task: AiTask): Promise<{ runId: string }>;
+  /** Waits up to `waitSeconds`; null while the run is still going. */
+  result?(runId: string, waitSeconds: number): Promise<AiTaskResult | null>;
 }
 
 /** The provider failed or took too long. The message is safe to show to users. */

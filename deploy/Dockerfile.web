@@ -1,0 +1,28 @@
+# Static frontend plus the gateway that serves it and routes /auth, /rest, /storage
+# and /api to the other containers. Build from the repository root:
+#   docker build -f deploy/Dockerfile.web .
+FROM node:22-alpine AS build
+RUN corepack enable
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/web/package.json apps/web/
+COPY packages/shared/package.json packages/shared/
+# Behind a TLS-inspecting proxy, pass its CA as a build secret named "ca" (optional).
+RUN --mount=type=secret,id=ca,required=false \
+    if [ -f /run/secrets/ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/ca; fi; \
+    pnpm install --frozen-lockfile --filter @app/web...
+COPY packages/shared packages/shared
+COPY apps/web apps/web
+# Placeholders: the real addresses are filled in when the container starts, so one
+# image works for any domain.
+ENV VITE_SUPABASE_URL=__APP_SUPABASE_URL__ \
+    VITE_SUPABASE_ANON_KEY=__APP_SUPABASE_ANON_KEY__ \
+    VITE_API_URL=__APP_API_URL__
+RUN pnpm --filter @app/web build
+
+FROM nginx:1.29-alpine
+COPY --from=build /app/apps/web/dist /usr/share/nginx/html
+COPY deploy/gateway/default.conf.template /etc/nginx/templates/default.conf.template
+COPY deploy/gateway/40-app-config.sh /docker-entrypoint.d/40-app-config.sh
+RUN chmod +x /docker-entrypoint.d/40-app-config.sh
+EXPOSE 80

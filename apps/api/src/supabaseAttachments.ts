@@ -8,6 +8,8 @@ export function supabaseAttachmentStore(config: SupabaseConfig, fetchImpl: typeo
   const base = config.url.replace(/\/+$/, '');
   const rest = `${base}/rest/v1`;
   const storage = `${base}/storage/v1`;
+  // Download links are opened by the browser, so they use the public address.
+  const publicStorage = `${(config.publicUrl || config.url).replace(/\/+$/, '')}/storage/v1`;
   const service = { apikey: config.serviceRoleKey, authorization: `Bearer ${config.serviceRoleKey}`, 'content-type': 'application/json' };
   const asUser = (token: string) => ({ apikey: config.publishableKey, authorization: `Bearer ${token}`, 'content-type': 'application/json' });
   // Paths are made of UUIDs, but encode each segment anyway.
@@ -107,7 +109,7 @@ export function supabaseAttachmentStore(config: SupabaseConfig, fetchImpl: typeo
     async signDownload(path, filename, seconds) {
       const res = await serviceCall('signing a download', objectUrl('sign/', path), { method: 'POST', body: JSON.stringify({ expiresIn: seconds }) });
       const { signedURL } = (await res.json()) as { signedURL: string };
-      return `${storage}${signedURL}&download=${encodeURIComponent(filename)}`;
+      return `${publicStorage}${signedURL}&download=${encodeURIComponent(filename)}`;
     },
   };
 }

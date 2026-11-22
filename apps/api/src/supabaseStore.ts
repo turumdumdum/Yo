@@ -10,6 +10,11 @@ export interface SupabaseConfig {
   publishableKey: string;
   /** Secret (service role) key: bypasses RLS. Backend only. */
   serviceRoleKey: string;
+  /**
+   * Address of Supabase as the browser sees it, when it differs from `url` (self-host:
+   * the API reaches Supabase inside the Docker network). Used for download links.
+   */
+  publicUrl?: string;
 }
 
 /** Talks to Supabase's REST API with fetch, so it runs on Workers and Node alike. */
