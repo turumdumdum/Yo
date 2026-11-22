@@ -43,7 +43,7 @@ beforeAll(async () => {
     (await c.query<{ id: string }>(`insert into public.requests (org_id, answers) values ($1, '{"serviceName": "Tool"}') returning id`, [org])).rows[0]!.id,
   );
   const stages = [
-    { name: 'Security review', status: 'In review', sla_business_days: 5, sla_due_at: '2026-12-01T00:00:00Z', checklist: [], external: true },
+    { name: 'Security review', status: 'In review', sla_business_days: 5, sla_due_at: '2026-12-01T00:00:00Z', checklist: [], external: true, external_service: 'grc-tool' },
     { name: 'License check', status: 'In review', sla_business_days: 5, sla_due_at: '2026-12-01T00:00:00Z', checklist: ['Terms ok'] },
   ];
   await asService((c) => c.query(`select public.submit_request($1, '{"serviceName": "Tool"}', 'High', 7, '[]', $2)`, [requestId, JSON.stringify(stages)]));
@@ -60,8 +60,10 @@ describe('external review stages', () => {
   it('are recorded at submission and visible to members', async () => {
     expect((await stage(external)).external).toBe(true);
     expect((await stage(internal)).external).toBe(false);
-    const seen = await asUser(admin, async (c) => (await c.query('select external from public.request_stages where id = $1', [external])).rows[0]);
-    expect(seen).toEqual({ external: true });
+    const seen = await asUser(admin, async (c) => (await c.query('select external, external_service from public.request_stages where id = $1', [external])).rows[0]);
+    expect(seen).toEqual({ external: true, external_service: 'grc-tool' });
+    const local = await asUser(requester, async (c) => (await c.query('select external_service from public.request_stages where id = $1', [internal])).rows[0]);
+    expect(local).toEqual({ external_service: null });
   });
 
   it('cannot be reviewed in this app', async () => {
