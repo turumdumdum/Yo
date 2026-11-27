@@ -148,7 +148,16 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
       encryptionReady,
       server: { publicApiUrl: r.publicApiUrl ?? '', source: r.publicApiSource },
       email: { provider: r.email.provider, from: r.email.from, configured: r.email.configured, source: r.email.source },
-      ai: { provider: r.aiInfo.provider, processor: r.aiInfo.processor, configured: r.aiInfo.configured, source: r.aiInfo.source },
+      ai: {
+        provider: r.aiInfo.provider,
+        processor: r.aiInfo.processor,
+        model: r.aiInfo.model,
+        baseUrl: r.aiInfo.baseUrl,
+        configured: r.aiInfo.configured,
+        source: r.aiInfo.source,
+        // Which providers have a saved key; the keys themselves never leave the server.
+        savedKeys: r.aiInfo.savedKeys,
+      },
       slack: { enabled: !!config.slack?.enabled, configured: !!secrets.slackWebhookUrl, events: config.slack?.events ?? [...SLACK_EVENTS] },
       upguard: { enabled: !!config.upguard?.enabled, configured: !!secrets.upguardApiKey },
       reviewServices,
@@ -304,15 +313,40 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
     const b = await body(c);
     if (b instanceof Response) return b;
     if (!(AI_PROVIDERS as readonly unknown[]).includes(b.provider)) return c.json({ error: 'Choose the AI provider, or off' }, 422);
+    const provider = b.provider as AiProviderName;
     const processor = b.processor === undefined ? 'base' : b.processor;
     if (!(AI_PROCESSORS as readonly unknown[]).includes(processor)) return c.json({ error: 'Choose lite, base or core' }, 422);
     if (b.apiKey !== undefined && (typeof b.apiKey !== 'string' || b.apiKey.trim().length < 8 || b.apiKey.length > 500)) return c.json({ error: 'Enter a valid API key' }, 422);
+    if (b.model !== undefined && (typeof b.model !== 'string' || b.model.length > 120 || !/^[\w.:/@-]*$/.test(b.model.trim()))) {
+      return c.json({ error: 'Enter the model name, for example claude-opus-5-5' }, 422);
+    }
+    const model = typeof b.model === 'string' ? b.model.trim() : '';
+    let baseUrl = '';
+    if (provider === 'openai_compatible') {
+      if (typeof b.baseUrl !== 'string' || !/^https?:\/\/[^\s]+$/i.test(b.baseUrl.trim()) || b.baseUrl.length > 500) {
+        return c.json({ error: 'Enter the server address, for example https://openrouter.ai/api/v1 or http://localhost:11434/v1' }, 422);
+      }
+      baseUrl = b.baseUrl.trim().replace(/\/+$/, '');
+      const local = isLocalAddress(baseUrl);
+      if (local && !o.allowLocalServiceUrls) {
+        return c.json({ error: 'Local and private addresses are refused. For a model on this machine or network set ALLOW_LOCAL_SERVICE_URLS=true on the API server.' }, 422);
+      }
+      if (!local && !baseUrl.toLowerCase().startsWith('https://')) return c.json({ error: 'The address must start with https:// (plain http only for local servers)' }, 422);
+      if (!model) return c.json({ error: 'Enter the model name your server uses' }, 422);
+    }
+    if (provider === 'openai' && !model) return c.json({ error: 'Enter the model name, for example the one your OpenAI account uses' }, 422);
     const { config, secrets } = await load(who.orgId);
-    const next = { ...secrets, ...(typeof b.apiKey === 'string' ? { parallelApiKey: b.apiKey.trim() } : {}) };
-    if (b.provider === 'parallel' && !next.parallelApiKey) return c.json({ error: 'Enter the Parallel API key' }, 422);
-    await saveAll(who.orgId, { ...config, ai: { provider: b.provider as AiProviderName, processor: processor as AiProcessor } }, next, who.userId, 'integration.ai_updated', {
-      provider: b.provider,
+    const keyField = ({ parallel: 'parallelApiKey', anthropic: 'anthropicApiKey', openai: 'openaiApiKey', openai_compatible: 'openaiCompatibleApiKey' } as const)[provider as Exclude<AiProviderName, 'off'>];
+    const next: IntegrationSecrets = { ...secrets, ...(keyField && typeof b.apiKey === 'string' ? { [keyField]: b.apiKey.trim() } : {}) };
+    if ((provider === 'parallel' || provider === 'anthropic' || provider === 'openai') && keyField && !next[keyField]) {
+      return c.json({ error: `Enter the ${provider === 'parallel' ? 'Parallel' : provider === 'anthropic' ? 'Anthropic' : 'OpenAI'} API key` }, 422);
+    }
+    const ai = { provider, processor: processor as AiProcessor, ...(model ? { model } : {}), ...(baseUrl ? { baseUrl } : {}) };
+    await saveAll(who.orgId, { ...config, ai }, next, who.userId, 'integration.ai_updated', {
+      provider,
       processor,
+      model: model || null,
+      base_url: baseUrl || null,
       key_changed: typeof b.apiKey === 'string',
     });
     return c.json({ ok: true });

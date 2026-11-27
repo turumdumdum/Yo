@@ -13,6 +13,7 @@ type Filter = 'attention' | 'active' | 'closed';
 export function ExceptionsSection({ supabase, orgId, userId, members }: { supabase: SupabaseClient; orgId: string; userId: string; members: Member[] }) {
   const [rows, setRows] = useState<ReviewException[] | null>(null);
   const [filter, setFilter] = useState<Filter>('attention');
+  const [stage, setStage] = useState<string>('all');
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -29,7 +30,8 @@ export function ExceptionsSection({ supabase, orgId, userId, members }: { supaba
 
   const today = new Date().toISOString().slice(0, 10);
   const groups: Record<Filter, ReviewException[]> = { attention: [], active: [], closed: [] };
-  for (const r of rows ?? []) {
+  const stageNames = [...new Set((rows ?? []).map((r) => r.stage_name ?? 'Security review'))].sort();
+  for (const r of (rows ?? []).filter((x) => stage === 'all' || (x.stage_name ?? 'Security review') === stage)) {
     const s = exceptionState(r, today);
     if (s === 'pending' || s === 'expiring' || s === 'expired') groups.attention.push(r);
     else if (s === 'active') groups.active.push(r);
@@ -42,11 +44,24 @@ export function ExceptionsSection({ supabase, orgId, userId, members }: { supaba
     <section className="card" aria-labelledby="exceptions-heading">
       <h2 id="exceptions-heading">Exceptions</h2>
       <p className="field-hint">
-        Every accepted deviation from the security baseline, with its reason, compensating measures and end date. Exceptions that
-        wait for a decision, end within 30 days or have expired need attention: accept or refuse them, or revoke and ask the owners
-        to configure the control.
+        Every deviation accepted in a review, with the review it came from, its reason, compensating measures and end date.
+        Exceptions that wait for a decision, end within 30 days or have expired need attention: accept or refuse them, or revoke
+        them so that what they waived must be met.
       </p>
       <FormError message={error} />
+      {stageNames.length > 1 && (
+        <div className="field inline-field">
+          <label htmlFor="exceptions-stage">Review</label>
+          <select id="exceptions-stage" value={stage} onChange={(e) => setStage(e.target.value)}>
+            <option value="all">All reviews</option>
+            {stageNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="chips" role="group" aria-label="Show">
         {(Object.keys(labels) as Filter[]).map((f) => (
           <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}>

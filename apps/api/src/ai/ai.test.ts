@@ -360,9 +360,12 @@ describe('configuration', () => {
     expect(optionsFromEnv({ ...base, AI_PROVIDER: '' }).ai).toBeUndefined();
   });
 
-  it('enables Parallel only with a key, and rejects unknown providers', () => {
+  it('enables a provider only when complete, and rejects unknown providers', () => {
     expect(optionsFromEnv({ ...base, AI_PROVIDER: 'parallel', PARALLEL_API_KEY: 'k' }).ai?.name).toBe('Parallel');
-    expect(() => optionsFromEnv({ ...base, AI_PROVIDER: 'parallel' })).toThrow(/PARALLEL_API_KEY/);
+    // Incomplete settings leave AI off (an admin can finish them in the UI) instead of stopping the API.
+    expect(optionsFromEnv({ ...base, AI_PROVIDER: 'parallel' }).ai).toBeUndefined();
+    expect(optionsFromEnv({ ...base, AI_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k' }).ai?.name).toBe('Anthropic');
+    expect(optionsFromEnv({ ...base, AI_PROVIDER: 'openai_compatible', AI_BASE_URL: 'http://localhost:11434/v1', AI_MODEL: 'llama3.1' }).ai?.name).toBe('localhost:11434');
     expect(() => optionsFromEnv({ ...base, AI_PROVIDER: 'skynet' })).toThrow(/Unknown AI_PROVIDER/);
   });
 });

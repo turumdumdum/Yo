@@ -1,3 +1,4 @@
+import type { FieldSource } from './asana';
 import { COUNTRIES } from './countries';
 import {
   BUSINESS_CRITICALITIES,
@@ -36,6 +37,8 @@ interface FieldBase {
   optional?: boolean;
   /** The field is shown, validated and stored only when another answer has one of these values. */
   showWhen?: { field: string; in: readonly string[] };
+  /** Set when the question was imported from another system (Asana), so a new import updates it. */
+  source?: FieldSource;
 }
 
 /** How choosing an option affects the risk tier. */

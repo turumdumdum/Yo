@@ -3,7 +3,7 @@ import { useId, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
-import { decideException, revokeException, type ReviewException } from './api';
+import { decideException, exceptionTitle, revokeException, type ReviewException } from './api';
 
 const formatDate = (iso: string) => new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString('en-GB', { dateStyle: 'medium' });
 const today = () => new Date().toISOString().slice(0, 10);
@@ -25,11 +25,13 @@ interface Props {
   nameOf: (userId: string | null) => string;
   /** Shown in the register, where exceptions of many requests are listed. */
   requestName?: string;
+  /** Opens the review the exception was raised in. */
+  onOpenStage?: (stageId: string) => void;
   onChanged: () => Promise<void> | void;
 }
 
 /** One exception with what it waives, why, the measures that make up for it, and its decision. */
-export function ExceptionItem({ supabase, exception: e, userId, isAdmin, nameOf, requestName, onChanged }: Props) {
+export function ExceptionItem({ supabase, exception: e, userId, isAdmin, nameOf, requestName, onOpenStage, onChanged }: Props) {
   const id = useId();
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
@@ -58,7 +60,7 @@ export function ExceptionItem({ supabase, exception: e, userId, isAdmin, nameOf,
       <div className="exception-head">
         <strong>
           {requestName ? `${requestName}: ` : ''}
-          {e.control_title}
+          {exceptionTitle(e)}
         </strong>
         <span className="badges">
           <span className="status-badge" data-tone={tone}>
@@ -70,6 +72,34 @@ export function ExceptionItem({ supabase, exception: e, userId, isAdmin, nameOf,
         </span>
       </div>
       <dl className="exception-facts">
+        {e.stage_name && (
+          <>
+            <dt>Raised in</dt>
+            <dd>
+              {e.stage_name}
+              {onOpenStage && e.stage_id && (
+                <>
+                  {' '}
+                  <button type="button" className="link-button" onClick={() => onOpenStage(e.stage_id!)}>
+                    Open the review
+                  </button>
+                </>
+              )}
+            </dd>
+          </>
+        )}
+        {e.control_title && (
+          <>
+            <dt>Control</dt>
+            <dd>{e.control_title}</dd>
+          </>
+        )}
+        {e.checklist_item && (
+          <>
+            <dt>Checklist item</dt>
+            <dd>{e.checklist_item}</dd>
+          </>
+        )}
         <dt>What deviates</dt>
         <dd>{e.deviation}</dd>
         <dt>Why</dt>
@@ -116,7 +146,7 @@ export function ExceptionItem({ supabase, exception: e, userId, isAdmin, nameOf,
                 className="button button-secondary button-small"
                 disabled={busy}
                 onClick={() => {
-                  if (window.confirm(e.status === 'pending' && !isAdmin ? 'Withdraw this exception?' : 'Revoke this exception? The control must then be met.')) {
+                  if (window.confirm(e.status === 'pending' && !isAdmin ? 'Withdraw this exception?' : e.control_id ? 'Revoke this exception? The control must then be met.' : 'Revoke this exception? What it waived must then be met.')) {
                     void run(() => revokeException(supabase, e.id, comment || null));
                   }
                 }}

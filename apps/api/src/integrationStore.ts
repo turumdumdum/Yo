@@ -10,7 +10,7 @@ export type SlackEvent = (typeof SLACK_EVENTS)[number];
 
 export const EMAIL_PROVIDERS = ['off', 'resend', 'smtp', 'log'] as const;
 export type EmailProviderName = (typeof EMAIL_PROVIDERS)[number];
-export const AI_PROVIDERS = ['off', 'parallel'] as const;
+export const AI_PROVIDERS = ['off', 'parallel', 'anthropic', 'openai', 'openai_compatible'] as const;
 export type AiProviderName = (typeof AI_PROVIDERS)[number];
 export const AI_PROCESSORS = ['lite', 'base', 'core'] as const;
 export type AiProcessor = (typeof AI_PROCESSORS)[number];
@@ -24,7 +24,10 @@ export interface IntegrationConfig {
   reviewServices?: ReviewService[];
   server?: { publicApiUrl: string };
   email?: { provider: EmailProviderName; from: string };
-  ai?: { provider: AiProviderName; processor: AiProcessor };
+  /** Asana, for importing project fields into the request form. The token is a secret. */
+  asana?: { workspaceGid: string | null; workspaceName: string | null };
+  /** model: Anthropic/OpenAI/compatible; baseUrl: OpenAI-compatible servers only. */
+  ai?: { provider: AiProviderName; processor: AiProcessor; model?: string; baseUrl?: string };
 }
 
 /** Saved encrypted, as one JSON object. */
@@ -37,7 +40,13 @@ export interface IntegrationSecrets {
   serviceSecrets?: Record<string, string>;
   resendApiKey?: string;
   smtpUrl?: string;
+  /** Asana personal access token. */
+  asanaToken?: string;
   parallelApiKey?: string;
+  anthropicApiKey?: string;
+  openaiApiKey?: string;
+  /** Key for an OpenAI-compatible server; local servers often need none. */
+  openaiCompatibleApiKey?: string;
 }
 
 export interface IntegrationRecord {

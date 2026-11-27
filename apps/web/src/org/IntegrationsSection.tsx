@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import {
+  loadAsanaStatus,
   loadIntegrations,
   saveAiProvider,
   saveEmailSettings,
@@ -12,9 +13,11 @@ import {
   SLACK_EVENTS,
   testEmail,
   testSlack,
+  type AiProviderName,
   type IntegrationsStatus,
   type SettingSource,
 } from '../requests/api';
+import { AsanaCard } from './AsanaCard';
 import { ReviewServicesCard } from './ReviewServicesCard';
 
 // Admin → Integrations. Everything can be set here; values from the server's .env file are
@@ -40,6 +43,14 @@ export function SourceBadge({ source }: { source: SettingSource }) {
  * A write-only secret input. When a secret is saved it shows "Saved" and a Replace button;
  * the typed value is kept only until the parent saves and clears it.
  */
+const AI_LABEL: Record<string, string> = { parallel: 'Parallel', anthropic: 'Anthropic', openai: 'OpenAI', openai_compatible: 'Server' };
+/** Suggested model per provider; editable, since model names change. */
+const AI_MODEL_HINT: Record<string, { value: string; placeholder: string }> = {
+  anthropic: { value: 'claude-opus-5-5', placeholder: 'claude-opus-5-5' },
+  openai: { value: '', placeholder: 'The model name from your OpenAI account' },
+  openai_compatible: { value: '', placeholder: 'For example llama3.1 or the model your server lists' },
+};
+
 export function SecretField({ label, saved, value, onChange, placeholder, hint }: { label: string; saved: boolean; value: string; onChange: (v: string) => void; placeholder?: string; hint?: string }) {
   const id = useId();
   const [replacing, setReplacing] = useState(false);
@@ -106,7 +117,7 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
 
   const [server, setServer] = useState({ publicApiUrl: '' });
   const [email, setEmail] = useState({ provider: 'off', from: '', resendApiKey: '', smtpUrl: '' });
-  const [ai, setAi] = useState({ provider: 'off', processor: 'base', apiKey: '' });
+  const [ai, setAi] = useState({ provider: 'off', processor: 'base', apiKey: '', model: '', baseUrl: '' });
   const [slack, setSlack] = useState({ enabled: false, events: [] as string[], webhookUrl: '' });
   const [upguard, setUpguard] = useState({ enabled: false, apiKey: '' });
   // Integrations opened from "Add an integration" in this visit.
@@ -118,7 +129,7 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
       setStatus(s);
       setServer({ publicApiUrl: s.server?.publicApiUrl ?? '' });
       setEmail({ provider: s.email?.provider ?? 'off', from: s.email?.from ?? '', resendApiKey: '', smtpUrl: '' });
-      setAi({ provider: s.ai?.provider ?? 'off', processor: s.ai?.processor || 'base', apiKey: '' });
+      setAi({ provider: s.ai?.provider ?? 'off', processor: s.ai?.processor || 'base', apiKey: '', model: s.ai?.model ?? '', baseUrl: s.ai?.baseUrl ?? '' });
       setSlack({ enabled: s.slack.enabled, events: s.slack.events, webhookUrl: '' });
       setUpguard({ enabled: s.upguard.enabled, apiKey: '' });
     } catch (e) {
@@ -146,6 +157,15 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
   }
 
   const secret = (v: string) => (v.trim() ? v.trim() : undefined);
+
+  // Asana keeps its own status (its card loads it); this only decides where the card shows.
+  const [asanaConnected, setAsanaConnected] = useState(false);
+  useEffect(() => {
+    loadAsanaStatus(supabase).then(
+      (s) => setAsanaConnected(s.configured),
+      () => undefined,
+    );
+  }, [supabase]);
 
   // Integrations that are set up show in full; the others wait under "Add an integration".
   const cards: { id: string; label: string; hint: string; active: boolean; node: ReactNode }[] = status
@@ -234,13 +254,23 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
         active: (status.ai?.provider ?? 'off') !== 'off',
         node: (
           <Card id="int-ai" title="AI assistant" badge={<SourceBadge source={status.ai?.source ?? 'none'} />}>
-            <p className="field-hint">Optional. Suggests vendor details and checks answers. The product works fully without it.</p>
+            <p className="field-hint">
+              Optional and off by default. Suggests vendor details and checks answers; the product works fully without it. Only
+              the answers chosen in Admin → AI check are sent, never attachments.
+            </p>
             <div className="editor-row">
               <div className="field">
                 <label htmlFor="ai-provider">Provider</label>
-                <select id="ai-provider" value={ai.provider} onChange={(e) => setAi({ ...ai, provider: e.target.value })}>
+                <select
+                  id="ai-provider"
+                  value={ai.provider}
+                  onChange={(e) => setAi({ ...ai, provider: e.target.value, apiKey: '', model: e.target.value === status.ai?.provider ? status.ai?.model ?? '' : AI_MODEL_HINT[e.target.value]?.value ?? '' })}
+                >
                   <option value="off">Off</option>
-                  <option value="parallel">Parallel</option>
+                  <option value="anthropic">Anthropic (Claude)</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="openai_compatible">OpenAI-compatible server (Ollama, LM Studio, OpenRouter…)</option>
+                  <option value="parallel">Parallel (web research)</option>
                 </select>
               </div>
               {ai.provider === 'parallel' && (
@@ -253,16 +283,62 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
                   </select>
                 </div>
               )}
+              {(ai.provider === 'anthropic' || ai.provider === 'openai' || ai.provider === 'openai_compatible') && (
+                <div className="field">
+                  <label htmlFor="ai-model">Model</label>
+                  <input
+                    id="ai-model"
+                    value={ai.model}
+                    spellCheck={false}
+                    placeholder={AI_MODEL_HINT[ai.provider]?.placeholder}
+                    onChange={(e) => setAi({ ...ai, model: e.target.value })}
+                  />
+                </div>
+              )}
             </div>
-            {ai.provider === 'parallel' && (
-              <SecretField label="Parallel API key" saved={status.ai?.provider === 'parallel' && status.ai.configured} value={ai.apiKey} onChange={(v) => setAi({ ...ai, apiKey: v })} />
+            {ai.provider === 'openai_compatible' && (
+              <div className="field">
+                <label htmlFor="ai-base-url">Server address</label>
+                <input
+                  id="ai-base-url"
+                  value={ai.baseUrl}
+                  spellCheck={false}
+                  placeholder="https://openrouter.ai/api/v1 or http://localhost:11434/v1"
+                  onChange={(e) => setAi({ ...ai, baseUrl: e.target.value })}
+                />
+                <p className="field-hint">
+                  The address before /chat/completions. A model on this machine or network needs ALLOW_LOCAL_SERVICE_URLS=true on the API
+                  server.
+                </p>
+              </div>
+            )}
+            {ai.provider !== 'off' && (
+              <SecretField
+                label={`${AI_LABEL[ai.provider] ?? 'Provider'} API key${ai.provider === 'openai_compatible' ? ' (if the server needs one)' : ''}`}
+                saved={!!status.ai?.savedKeys?.includes(ai.provider as AiProviderName) || (status.ai?.provider === ai.provider && status.ai.source === 'env' && status.ai.configured)}
+                value={ai.apiKey}
+                onChange={(v) => setAi({ ...ai, apiKey: v })}
+              />
+            )}
+            {(ai.provider === 'anthropic' || ai.provider === 'openai' || ai.provider === 'openai_compatible') && (
+              <p className="field-hint">These models have no web access: vendor details they suggest come from what the model knows. Check them before accepting.</p>
             )}
             <button
               type="button"
               className="button"
               disabled={busy}
               onClick={() =>
-                void run(() => saveAiProvider(supabase, { provider: ai.provider, ...(ai.provider === 'parallel' ? { processor: ai.processor } : {}), apiKey: secret(ai.apiKey) }), 'AI settings saved.')
+                void run(
+                  () =>
+                    saveAiProvider(supabase, {
+                      provider: ai.provider,
+                      ...(ai.provider === 'parallel' ? { processor: ai.processor } : {}),
+                      ...(ai.provider === 'anthropic' || ai.provider === 'openai' || ai.provider === 'openai_compatible' ? { model: ai.model.trim() } : {}),
+                      ...(ai.provider === 'openai_compatible' ? { baseUrl: ai.baseUrl.trim() } : {}),
+                      apiKey: secret(ai.apiKey),
+                    }),
+                  'AI settings saved.',
+                )
               }
             >
               Save AI settings
@@ -341,6 +417,13 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
             </button>
           </Card>
         ),
+      },
+      {
+        id: 'asana',
+        label: 'Asana',
+        hint: 'Import project fields into the request form',
+        active: asanaConnected,
+        node: <AsanaCard supabase={supabase} onChanged={setAsanaConnected} />,
       },
       {
         id: 'services',

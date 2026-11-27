@@ -1,5 +1,5 @@
 import { type ReviewService } from '@app/shared';
-import { parallelProvider } from './ai/parallel';
+import { aiConfigured, buildAiProvider } from './ai/factory';
 import type { AiProvider } from './ai/provider';
 import { decrypt, type EncryptionKey } from './crypto';
 import { logMailer, resendMailer, type Mailer } from './email';
@@ -15,7 +15,16 @@ export type Source = 'settings' | 'env' | 'none';
 export interface EnvSettings {
   publicApiUrl?: string;
   email: { provider: EmailProviderName; from?: string; resendApiKey?: string; smtpUrl?: string };
-  ai: { provider: AiProviderName; apiKey?: string; processor?: string; baseUrl?: string };
+  ai: { provider: AiProviderName; apiKey?: string; processor?: string; baseUrl?: string; model?: string };
+}
+
+/** The environment variable that holds the key of each provider. */
+function envAiKey(env: Env, provider: string): string | undefined {
+  if (provider === 'parallel') return env.PARALLEL_API_KEY || undefined;
+  if (provider === 'anthropic') return env.ANTHROPIC_API_KEY || undefined;
+  if (provider === 'openai') return env.OPENAI_API_KEY || undefined;
+  if (provider === 'openai_compatible') return env.AI_API_KEY || undefined;
+  return undefined;
 }
 
 type Env = Record<string, string | undefined>;
@@ -26,7 +35,13 @@ export function envSettings(env: Env): EnvSettings {
   return {
     publicApiUrl: env.PUBLIC_API_URL || undefined,
     email: { provider: emailProvider, from: env.EMAIL_FROM || undefined, resendApiKey: env.RESEND_API_KEY || undefined, smtpUrl: env.SMTP_URL || undefined },
-    ai: { provider: aiProvider, apiKey: env.PARALLEL_API_KEY || undefined, processor: env.PARALLEL_PROCESSOR || undefined, baseUrl: env.PARALLEL_BASE_URL || undefined },
+    ai: {
+      provider: aiProvider,
+      apiKey: envAiKey(env, aiProvider),
+      processor: env.PARALLEL_PROCESSOR || undefined,
+      baseUrl: (aiProvider === 'parallel' ? env.PARALLEL_BASE_URL : env.AI_BASE_URL) || undefined,
+      model: env.AI_MODEL || undefined,
+    },
   };
 }
 
@@ -41,7 +56,7 @@ export interface ResolvedSettings {
   mailer?: Mailer;
   email: { provider: EmailProviderName; from: string; configured: boolean; source: Source };
   ai?: AiProvider;
-  aiInfo: { provider: AiProviderName; processor: AiProcessor; configured: boolean; source: Source };
+  aiInfo: { provider: AiProviderName; processor: AiProcessor; model: string; baseUrl: string; configured: boolean; source: Source; savedKeys: AiProviderName[] };
   services: ReviewService[];
   /** The signing secret of a review service, or null. */
   serviceSecret(id: string): string | null;
@@ -86,9 +101,14 @@ export function buildResolved(config: IntegrationConfig, secrets: IntegrationSec
   // AI
   const aiFromSettings = !!config.ai;
   const aiProvider = config.ai?.provider ?? env.ai.provider;
-  const aiKey = aiFromSettings ? secrets.parallelApiKey : env.ai.apiKey;
+  const aiKey = aiFromSettings ? savedAiKey(secrets, aiProvider) : env.ai.apiKey;
   const processor = (config.ai?.processor ?? (PROCESSORS.has(env.ai.processor ?? '') ? env.ai.processor : 'base')) as AiProcessor;
-  const ai = aiProvider === 'parallel' && aiKey ? parallelProvider({ apiKey: aiKey, processor, baseUrl: env.ai.baseUrl }, fetchImpl ?? fetch) : undefined;
+  const aiModel = (aiFromSettings ? config.ai?.model : env.ai.model) ?? '';
+  // Parallel's address comes only from the environment; a compatible server's from the settings.
+  const aiBaseUrl = (aiFromSettings ? (aiProvider === 'parallel' ? env.ai.baseUrl : config.ai?.baseUrl) : env.ai.baseUrl) ?? '';
+  const aiSettings = { provider: aiProvider, apiKey: aiKey, processor, model: aiModel || undefined, baseUrl: aiBaseUrl || undefined };
+  const ai = buildAiProvider(aiSettings, fetchImpl ?? fetch);
+  const savedKeys = (['parallel', 'anthropic', 'openai', 'openai_compatible'] as const).filter((p) => !!savedAiKey(secrets, p));
 
   const { services, serviceSecrets } = reviewServicesOf(config, secrets);
   return {
@@ -99,10 +119,27 @@ export function buildResolved(config: IntegrationConfig, secrets: IntegrationSec
     mailer,
     email: { provider: emailProvider, from, configured: emailConfigured, source: fromSettings ? 'settings' : env.email.provider !== 'off' ? 'env' : 'none' },
     ai,
-    aiInfo: { provider: aiProvider, processor, configured: aiProvider === 'parallel' && !!aiKey, source: aiFromSettings ? 'settings' : env.ai.provider !== 'off' ? 'env' : 'none' },
+    aiInfo: {
+      provider: aiProvider,
+      processor,
+      model: aiModel,
+      baseUrl: aiProvider === 'openai_compatible' ? aiBaseUrl : '',
+      configured: aiConfigured(aiSettings),
+      source: aiFromSettings ? 'settings' : env.ai.provider !== 'off' ? 'env' : 'none',
+      savedKeys,
+    },
     services,
     serviceSecret: (id) => serviceSecrets[id] ?? null,
   };
+}
+
+/** The saved key of one AI provider. */
+export function savedAiKey(secrets: IntegrationSecrets, provider: string): string | undefined {
+  if (provider === 'parallel') return secrets.parallelApiKey;
+  if (provider === 'anthropic') return secrets.anthropicApiKey;
+  if (provider === 'openai') return secrets.openaiApiKey;
+  if (provider === 'openai_compatible') return secrets.openaiCompatibleApiKey;
+  return undefined;
 }
 
 export interface SettingsResolver {

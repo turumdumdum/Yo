@@ -5,7 +5,9 @@ import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import { inReviewScope, type Member } from '../org/api';
 import { AnswerSummary } from './AnswerSummary';
-import { assignReviewer, decideStage, saveReviewAnswers, setChecklistItem, type InfoRequest, type StageRow } from './api';
+import { assignReviewer, decideStage, exceptionTitle, saveReviewAnswers, setChecklistItem, type InfoRequest, type ReviewException, type StageRow } from './api';
+import { ExceptionItem } from './ExceptionItem';
+import { RaiseException } from './RaiseException';
 import { AskForm, QuestionThread } from './Questions';
 import { Guide } from './Guide';
 import { ReviewForm } from './ReviewForm';
@@ -46,6 +48,8 @@ interface Props {
   controls?: ReactNode;
   /** Required controls still without a decision; they block approval. */
   controlsOpen?: number;
+  /** Exceptions raised in this stage. */
+  exceptions?: ReviewException[];
   /** The tab to show first, kept by the parent so it survives the panel being rebuilt after a change. */
   initialTab?: Tab;
   onTabChange?: (tab: Tab) => void;
@@ -53,7 +57,7 @@ interface Props {
   onChanged: () => Promise<void> | void;
 }
 
-export type StageTab = 'guide' | 'request' | 'form' | 'checklist' | 'controls' | 'questions' | 'decision';
+export type StageTab = 'guide' | 'request' | 'form' | 'checklist' | 'controls' | 'questions' | 'exceptions' | 'decision';
 type Tab = StageTab;
 
 const OPEN = new Set(['In review', 'Waiting for requester']);
@@ -81,7 +85,7 @@ const DECISIONS: { value: StageDecision; title: string; text: string }[] = [
 ];
 
 /** Everything about one stage, in tabs: the request, the review form, the checklist, questions and the decision. */
-export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers, questions, requesterId, context, controls, controlsOpen = 0, initialTab, onTabChange, onChanged }: Props) {
+export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers, questions, requesterId, context, controls, controlsOpen = 0, exceptions = [], initialTab, onTabChange, onChanged }: Props) {
   // Older stages may lack the review form columns.
   const stage = { ...raw, review_fields: raw.review_fields ?? [], review_rules: raw.review_rules ?? [], checklist: raw.checklist ?? [] };
   const id = useId();
@@ -92,6 +96,7 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
   const [busy, setBusy] = useState(false);
   // Ticks show at once and are dropped again once the server answered, either way.
   const [ticking, setTicking] = useState<Record<number, boolean>>({});
+  const [raising, setRaising] = useState(false);
 
   // Review form answers: kept here, saved shortly after each change.
   const [review, setReview] = useState<Answers>(reviewAnswers ?? {});
@@ -144,6 +149,10 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
   const formComplete = missingCount === 0;
   const focus = focusFieldsForStage(stage.name);
   const openQuestions = questions.filter((q) => q.answered_at === null).length;
+  const pendingExceptions = exceptions.filter((e) => e.status === 'pending').length;
+  const acceptedExceptions = exceptions.filter((e) => e.status === 'approved');
+  const isAdmin = context.members.find((m) => m.user_id === context.userId)?.role === 'org_admin';
+  const exceptionBlock = pendingExceptions > 0 ? ['wait until an org admin decides on the exception'] : [];
 
   // What blocks each decision, in words.
   const blockers: Record<StageDecision, string[]> = {
@@ -151,10 +160,13 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
       ...(allChecked ? [] : ['tick every checklist item']),
       ...(formComplete ? [] : ['answer the required questions of the review form']),
       ...(controlsOpen > 0 ? ['decide on every required configuration control'] : []),
+      ...exceptionBlock,
+      ...(acceptedExceptions.length > 0 && pendingExceptions === 0 ? ['approve with conditions, because exceptions apply'] : []),
     ],
     'Approved with conditions': [
       ...(formComplete ? [] : ['answer the required questions of the review form']),
       ...(controlsOpen > 0 ? ['decide on every required configuration control'] : []),
+      ...exceptionBlock,
     ],
     Rejected: [],
   };
@@ -169,6 +181,9 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
     ...(stage.checklist.length > 0 ? [{ id: 'checklist' as const, label: 'Checklist', badge: `${checkedCount}/${stage.checklist.length}`, done: allChecked }] : []),
     ...(controls ? [{ id: 'controls' as const, label: 'Configuration', badge: controlsOpen > 0 ? `${controlsOpen} open` : undefined, done: controlsOpen === 0 }] : []),
     ...(questions.length > 0 || canAct ? [{ id: 'questions' as const, label: 'Questions', badge: questions.length > 0 ? String(questions.length) : undefined, done: questions.length > 0 && openQuestions === 0 }] : []),
+    ...(exceptions.length > 0 || canAct
+      ? [{ id: 'exceptions' as const, label: 'Exceptions', badge: exceptions.length > 0 ? String(exceptions.length) : undefined, done: exceptions.length > 0 && pendingExceptions === 0 }]
+      : []),
     ...(canAct || stage.decided_at ? [{ id: 'decision' as const, label: 'Decision', done: !!stage.decided_at }] : []),
   ];
   const [tab, setTabState] = useState<Tab>(() => initialTab ?? (stage.decided_at ? 'decision' : (tabs[0]?.id ?? 'decision')));
@@ -229,6 +244,11 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
     ...(controls
       ? [{ ok: controlsOpen === 0, text: controlsOpen === 0 ? 'Configuration: every required control decided' : `Configuration: ${controlsOpen} required ${controlsOpen === 1 ? 'control' : 'controls'} without a decision (needed to approve)`, tab: 'controls' as const }]
       : []),
+    ...(pendingExceptions > 0
+      ? [{ ok: false, text: `${pendingExceptions} ${pendingExceptions === 1 ? 'exception waits' : 'exceptions wait'} for an org admin’s decision (needed to approve)`, tab: 'exceptions' as const }]
+      : acceptedExceptions.length > 0
+        ? [{ ok: true, text: `${acceptedExceptions.length} accepted ${acceptedExceptions.length === 1 ? 'exception' : 'exceptions'}: approve with conditions and name ${acceptedExceptions.length === 1 ? 'it' : 'them'}`, tab: 'exceptions' as const }]
+        : []),
     ...(openQuestions > 0 ? [{ ok: false, note: true, text: `${openQuestions} ${openQuestions === 1 ? 'question waits' : 'questions wait'} for the requester’s answer`, tab: 'questions' as const }] : []),
   ];
 
@@ -398,6 +418,47 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
           </div>
         )}
 
+        {current === 'exceptions' && (
+          <div className="stage-exceptions">
+            {exceptions.length === 0 && !raising && (
+              <p className="empty">No exceptions. Raise one when the service may be used although something in this review is not met.</p>
+            )}
+            {exceptions.length > 0 && (
+              <ul className="exception-list">
+                {exceptions.map((e) => (
+                  <ExceptionItem
+                    key={e.id}
+                    supabase={supabase}
+                    exception={e}
+                    userId={context.userId}
+                    isAdmin={isAdmin && !context.readOnly}
+                    nameOf={(u) => (u === context.userId ? 'you' : (nameOf(u) ?? 'a former member'))}
+                    onChanged={onChanged}
+                  />
+                ))}
+              </ul>
+            )}
+            {canAct &&
+              (raising ? (
+                <RaiseException
+                  supabase={supabase}
+                  stageId={stage.id}
+                  stageName={stage.name}
+                  checklist={stage.checklist.map((c) => c.label)}
+                  onRaised={async () => {
+                    setRaising(false);
+                    await onChanged();
+                  }}
+                  onCancel={() => setRaising(false)}
+                />
+              ) : (
+                <button type="button" className="button button-secondary button-small" onClick={() => setRaising(true)}>
+                  Raise an exception
+                </button>
+              ))}
+          </div>
+        )}
+
         {current === 'decision' && stage.decided_at && (
           <div className="decision">
             <p>
@@ -411,6 +472,15 @@ export function StagePanel({ supabase, stage: raw, answers, form, reviewAnswers,
             {stage.decision_comment && (
               <p>
                 <strong>Comment:</strong> {stage.decision_comment}
+              </p>
+            )}
+            {acceptedExceptions.length > 0 && (
+              <p>
+                <strong>With accepted {acceptedExceptions.length === 1 ? 'exception' : 'exceptions'}:</strong>{' '}
+                {acceptedExceptions.map((e) => `${exceptionTitle(e)} (until ${formatDate(e.expires_on)})`).join('; ')}{' '}
+                <button type="button" className="link-button" onClick={goto('exceptions')}>
+                  Details
+                </button>
               </p>
             )}
           </div>

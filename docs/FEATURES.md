@@ -73,6 +73,17 @@ When the requester chooses "keep confidential", only the requester, org admins, 
 
 Off by default and never required. With your own API key: suggestions for vendor details, and a check of the answers at the end of the form that can propose corrected answers. Nothing changes until the requester clicks **Accept**. Attachments and owner names are never sent.
 
+Choose the provider in **Admin → Integrations → AI assistant**:
+
+| Provider | Notes |
+| --- | --- |
+| Anthropic (Claude) | Your Anthropic API key; model `claude-opus-5-5` by default (editable). Answers are constrained to a JSON schema |
+| OpenAI | Your OpenAI API key and a model name |
+| OpenAI-compatible server | Any `/chat/completions` server: Ollama, LM Studio, vLLM, OpenRouter… Address and model; key only if the server needs one. Local addresses need `ALLOW_LOCAL_SERVICE_URLS=true` |
+| Parallel | Web research with sources; depth Lite / Base / Core |
+
+Language models have no web access, so vendor details they suggest come from what the model knows; every suggestion stays labelled **Suggested** until accepted.
+
 ### Integrations
 
 Everything is set up in **Admin → Integrations**: the server address, email, AI, Slack, UpGuard and review services. Keys and webhook addresses are entered there once, stored encrypted, and never shown again (write-only). The server's environment file only holds what the API needs to start: the Supabase connection, the web address, and the encryption key, which the Node API creates by itself on first start.
@@ -80,7 +91,7 @@ Everything is set up in **Admin → Integrations**: the server address, email, A
 | Integration | What it does | Notes |
 | --- | --- | --- |
 | Email | Sends invitations | Resend, any SMTP server, or a log for testing; set in the UI |
-| AI | Optional vendor lookup and answer check | Your own provider key, set in the UI; off by default |
+| AI | Optional vendor lookup and answer check | Anthropic, OpenAI, any OpenAI-compatible server or Parallel; your own key, set in the UI; off by default |
 | Slack | Posts notifications to a channel (submitted, decided, exceptions, …) | Incoming webhook; confidential requests are not named |
 | UpGuard | Shows the vendor's external security rating on the request | The API endpoint and fields were written without access to UpGuard's documentation and **must be verified** before use |
 | VirusTotal | A link to the vendor's domain report | No key needed; opens virustotal.com |

@@ -166,3 +166,78 @@ describe('confirming the configuration after approval', () => {
     expect((await config()).sso!.configured).toBe(false);
   });
 });
+
+describe('exceptions raised from any review', () => {
+  let otherAdmin: string;
+  let licenseReviewer: string;
+  let outsider: string;
+  let licenseRequest: string;
+  let licenseStage: string;
+  let exceptionId: string;
+  const raise = (userId: string, stageId: string, overrides: { title?: string | null; checklist?: string | null; expires?: string } = {}) =>
+    asUser(userId, async (c) =>
+      (
+        await c.query<{ id: string }>(
+          `select public.raise_stage_exception($1, $2, 'Seats exceed the licence', 'Needed for the launch', 'True-up at renewal', 'Low', ${overrides.expires ?? 'current_date + 90'}, null, $3) as id`,
+          [stageId, overrides.title === undefined ? 'Licence seats' : overrides.title, overrides.checklist ?? null],
+        )
+      ).rows[0]!.id,
+    );
+  const decideLicense = (userId: string, decision: string) =>
+    asUser(userId, (c) => c.query('select public.decide_stage($1, $2, $3, $4)', [licenseStage, decision, 'no', 'Seat true-up at renewal']));
+
+  beforeAll(async () => {
+    licenseReviewer = await createUser('license@a.example');
+    outsider = await createUser('outsider@b.example');
+    otherAdmin = admin2;
+    await pool.query(`insert into public.memberships (org_id, user_id, role) values ($1, $2, 'reviewer')`, [org, licenseReviewer]);
+    await asUser(outsider, (c) => c.query(`select public.create_organization('Org B')`)).catch(() => undefined);
+    licenseRequest = await asUser(requester, async (c) =>
+      (await c.query<{ id: string }>(`insert into public.requests (org_id, answers) values ($1, '{"serviceName": "Seats"}') returning id`, [org])).rows[0]!.id,
+    );
+    // Confidential: only people who oversee it (and its assigned reviewer) see it and its exceptions.
+    await asService((c) => c.query('select public.set_request_confidentiality($1, true, null)', [licenseRequest]));
+    const stages = [{ name: 'License check', status: 'In review', sla_business_days: 5, sla_due_at: '2026-12-01T00:00:00Z', checklist: ['Seats counted'] }];
+    await asService((c) => c.query(`select public.submit_request($1, '{"serviceName": "Seats"}', 'Low', 1, '[]', $2)`, [licenseRequest, JSON.stringify(stages)]));
+    licenseStage = (await pool.query(`select id from public.request_stages where request_id = $1`, [licenseRequest])).rows[0].id;
+    await asUser(admin, (c) => c.query('select public.assign_stage_reviewer($1, $2)', [licenseStage, licenseReviewer]));
+  });
+
+  it('are raised by the stage reviewer, tied to the stage and optionally to a checklist item', async () => {
+    await expect(raise(requester, licenseStage)).rejects.toThrow(/not a reviewer|stage not found/);
+    await expect(raise(reviewer, licenseStage)).rejects.toThrow(/not a reviewer|stage not found/);
+    await expect(raise(outsider, licenseStage)).rejects.toThrow(/not a reviewer|stage not found|multi-factor|not found/);
+    await expect(raise(licenseReviewer, licenseStage, { title: null })).rejects.toThrow(/short title/);
+    await expect(raise(licenseReviewer, licenseStage, { checklist: 'Unknown item' })).rejects.toThrow(/checklist item not found/);
+    await expect(raise(licenseReviewer, licenseStage, { expires: 'current_date + 366' })).rejects.toThrow(/within a year/);
+    exceptionId = await raise(licenseReviewer, licenseStage, { checklist: 'Seats counted' });
+    const row = (await pool.query('select stage_id, stage_name, title, checklist_item, control_id, requested_by from public.review_exceptions where id = $1', [exceptionId])).rows[0];
+    expect(row).toEqual({ stage_id: licenseStage, stage_name: 'License check', title: 'Licence seats', checklist_item: 'Seats counted', control_id: null, requested_by: licenseReviewer });
+    const audit = (await pool.query(`select metadata from public.audit_log where entity_id = $1 and action = 'exception.requested'`, [exceptionId])).rows[0].metadata;
+    expect(audit).toMatchObject({ stage: 'License check', request_id: licenseRequest });
+  });
+
+  it('block approving the stage while waiting, then allow only "with conditions"', async () => {
+    await expect(decideLicense(licenseReviewer, 'Approved with conditions')).rejects.toThrow(/waiting for an org admin/);
+    await expect(asUser(licenseReviewer, (c) => c.query('select public.decide_exception($1, true, null)', [exceptionId]))).rejects.toThrow(/only an org admin/);
+    await asUser(otherAdmin, (c) => c.query('select public.decide_exception($1, true, $2)', [exceptionId, 'Fine until renewal']));
+    await asUser(licenseReviewer, (c) => c.query('select public.set_stage_checklist_item($1, 0, true)', [licenseStage]));
+    await expect(decideLicense(licenseReviewer, 'Approved')).rejects.toThrow(/approve with conditions/);
+    await decideLicense(licenseReviewer, 'Approved with conditions');
+    const audit = (await pool.query(`select metadata from public.audit_log where entity_id = $1 and action = 'stage.decided'`, [licenseStage])).rows[0].metadata;
+    expect(audit.exceptions).toEqual([exceptionId]);
+  });
+
+  it('cannot be read from another organization', async () => {
+    const seen = await asUser(outsider, async (c) => (await c.query('select id from public.review_exceptions')).rowCount);
+    expect(seen).toBe(0);
+  });
+
+  it('follow the visibility of a confidential request', async () => {
+    const count = (userId: string) => asUser(userId, async (c) => (await c.query('select id from public.review_exceptions where request_id = $1', [licenseRequest])).rowCount);
+    expect(await count(requester)).toBe(1);
+    expect(await count(reviewer)).toBe(0);
+    expect(await count(admin)).toBe(1);
+    expect(await count(licenseReviewer)).toBe(1);
+  });
+});

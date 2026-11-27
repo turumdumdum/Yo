@@ -1,3 +1,4 @@
+import { checkFieldSource } from './asana';
 import { RISK_TIERS } from './domain';
 import {
   type FieldDef,
@@ -127,7 +128,13 @@ function checkField(raw: unknown, seen: Map<string, FieldDef>, where: string): s
     }
   }
 
-  const known = new Set(['key', 'label', 'hint', 'placeholder', 'optional', 'type', 'options', 'risk', 'maxLength', 'min', 'max', 'riskBands', 'showWhen']);
+  if (f.source !== undefined) {
+    const values = isChoice(type) ? new Set((f.options as Option[]).map((o) => o.value)) : null;
+    const problem = checkFieldSource(f.source, values);
+    if (problem) return `${name}: ${problem}`;
+  }
+
+  const known = new Set(['key', 'label', 'hint', 'placeholder', 'optional', 'type', 'options', 'risk', 'maxLength', 'min', 'max', 'riskBands', 'showWhen', 'source']);
   const extra = Object.keys(f).find((k) => !known.has(k));
   if (extra) return `${name} has an unknown setting “${extra}”`;
   return null;
@@ -277,6 +284,15 @@ export function repairRequestForm(form: RequestFormDefinition): RequestFormDefin
         const offered = new Set(next.options.map((o) => o.value));
         const entries = Object.entries(next.risk).filter(([value]) => offered.has(value));
         if (entries.length !== Object.keys(next.risk).length) next = { ...next, risk: Object.fromEntries(entries) };
+      }
+      // An imported question keeps the Asana ids only of the choices it still has.
+      if (next.source?.optionGids) {
+        const offered = 'options' in next ? new Set(next.options.map((o) => o.value)) : new Set<string>();
+        const entries = Object.entries(next.source.optionGids).filter(([value]) => offered.has(value));
+        if (entries.length !== Object.keys(next.source.optionGids).length) {
+          const { optionGids: _dropped, ...source } = next.source;
+          next = { ...next, source: 'options' in next ? { ...source, optionGids: Object.fromEntries(entries) } : source };
+        }
       }
       return next;
     }),

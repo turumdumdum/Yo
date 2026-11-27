@@ -6,7 +6,8 @@ import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
 import { AnswerSummary } from './AnswerSummary';
 import { Attachments } from './Attachments';
-import { listInfoRequests, listStages, loadRequest, requestReviewAnswers, type InfoRequest, type RequestRow, type StageRow } from './api';
+import { listExceptions, listInfoRequests, listStages, loadRequest, requestReviewAnswers, type InfoRequest, type RequestRow, type ReviewException, type StageRow } from './api';
+import { ExceptionItem } from './ExceptionItem';
 import { ActionRequired } from './Questions';
 import { RequestProgress } from './RequestProgress';
 import { StageList } from './StageList';
@@ -32,18 +33,22 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
   const [stages, setStages] = useState<StageRow[] | null>(null);
   const [reviewAnswers, setReviewAnswers] = useState<Record<string, Answers>>({});
   const [questions, setQuestions] = useState<InfoRequest[]>([]);
+  const [exceptions, setExceptions] = useState<ReviewException[]>([]);
+  const [focus, setFocus] = useState<{ stageId: string; n: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
       // The request itself too: the last stage decision changes its status.
-      const [fresh, rows, review, asked] = await Promise.all([
+      const [fresh, rows, review, asked, raised] = await Promise.all([
         loadRequest(supabase, initial.id),
         listStages(supabase, initial.id),
         requestReviewAnswers(supabase, initial.id),
         listInfoRequests(supabase, initial.id),
+        listExceptions(supabase, initial.id),
       ]);
       setQuestions(asked);
+      setExceptions(raised);
       if (fresh) setRequest(fresh);
       setStages(rows);
       setReviewAnswers(review);
@@ -131,11 +136,36 @@ export function RequestDetail({ supabase, request: initial, context, initialStag
                     securityOpen && (request.config_requirements ?? []).length > 0 ? <SecurityConfig supabase={supabase} request={request} stages={stages} context={context} onChanged={reload} embedded /> : undefined
                   }
                   securityControlsOpen={openControls(request)}
+                  exceptions={exceptions}
+                  focus={focus}
                   onChanged={reload}
                 />
               ) : (
                 <p role="status">Loading…</p>
               )}
+            </section>
+          )}
+
+          {exceptions.length > 0 && (
+            <section className="card" aria-labelledby="request-exceptions-heading">
+              <h2 id="request-exceptions-heading">Exceptions</h2>
+              <p className="field-hint">Deviations accepted, or waiting to be accepted, for this request. Each belongs to the review it was raised in.</p>
+              <fieldset className="readonly-fieldset" disabled={!!context.readOnly}>
+                <ul className="exception-list">
+                  {exceptions.map((e) => (
+                    <ExceptionItem
+                      key={e.id}
+                      supabase={supabase}
+                      exception={e}
+                      userId={context.userId}
+                      isAdmin={context.members.find((m) => m.user_id === context.userId)?.role === 'org_admin'}
+                      nameOf={(u) => (u === context.userId ? 'you' : (context.members.find((m) => m.user_id === u)?.email ?? 'a former member'))}
+                      onOpenStage={(stageId) => setFocus((cur) => ({ stageId, n: (cur?.n ?? 0) + 1 }))}
+                      onChanged={reload}
+                    />
+                  ))}
+                </ul>
+              </fieldset>
             </section>
           )}
 

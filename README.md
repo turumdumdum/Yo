@@ -23,7 +23,7 @@ Open-source vendor intake and due-diligence service. A requester submits a reque
 | Archive and trash | Org admins archive decided vendors, move them to the trash (visible to admins only), restore them or delete them for good with their files |
 | Attachments | Private storage, upload and download only through short-lived signed links issued by the API, downloads audited. Not scanned for malware |
 | Admin | Sections for people (search, roles, invitations by email one by one or in bulk from CSV/JSON), email domains, request form editor with preview, review form editor, settings |
-| AI plugin (optional) | Off by default. With your own Parallel API key: vendor lookup with suggestions under each field, and a check of the answers that proposes corrected answers the requester can accept. Admins set instructions and the questions to check. Other providers can be plugged in |
+| AI plugin (optional) | Off by default. With your own key for Anthropic (Claude), OpenAI, any OpenAI-compatible server (Ollama, LM Studio, OpenRouter…) or Parallel: vendor lookup with suggestions under each field, and a check of the answers that proposes corrected answers the requester can accept. Admins set instructions and the questions to check |
 | Integrations | Slack notifications, UpGuard vendor rating (endpoint to be verified against UpGuard's docs), link to VirusTotal, external review service with signed JSON both ways; secrets encrypted on the server |
 | Review guides | Per check, written by the organization, shown to reviewers in a Guide tab |
 | `packages/shared` | Product vocabulary, form definition and validation, triage risk-tier engine |

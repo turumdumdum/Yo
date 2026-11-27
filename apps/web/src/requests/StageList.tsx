@@ -1,8 +1,8 @@
 import type { Answers, RequestFormDefinition } from '@app/shared';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { StatusBadge } from '../components/StatusBadge';
-import type { InfoRequest, StageRow } from './api';
+import type { InfoRequest, ReviewException, StageRow } from './api';
 import { inReviewScope } from '../org/api';
 import { dueText, StagePanel, type ReviewContext, type StageTab } from './StagePanel';
 
@@ -31,14 +31,25 @@ interface Props {
   /** Configuration controls, shown inside the security review. */
   securityControls?: ReactNode;
   securityControlsOpen?: number;
+  /** Exceptions of the request; each stage shows its own. */
+  exceptions?: ReviewException[];
+  /** Opens a stage from elsewhere on the page; a new `n` opens it again. */
+  focus?: { stageId: string; n: number } | null;
   onChanged: () => Promise<void> | void;
 }
 
 /** Review stages of a submitted request, with progress, reviewer, SLA and the review itself. */
-export function StageList({ supabase, stages, answers, form, reviewAnswers, questions, requesterId, context, initialStageId, securityControls, securityControlsOpen, onChanged }: Props) {
+export function StageList({ supabase, stages, answers, form, reviewAnswers, questions, requesterId, context, initialStageId, securityControls, securityControlsOpen, exceptions = [], focus, onChanged }: Props) {
   const [expanded, setExpanded] = useState<string | null>(initialStageId ?? null);
   // The open tab of each stage, kept here: the panel is rebuilt after every decision or question.
   const [tabs, setTabs] = useState<Record<string, StageTab>>({});
+
+  useEffect(() => {
+    if (!focus) return;
+    setExpanded(focus.stageId);
+    setTabs((cur) => ({ ...cur, [focus.stageId]: 'exceptions' }));
+    document.getElementById(`stage-${focus.stageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [focus]);
 
   if (stages.length === 0) {
     return <p className="empty">This request was submitted before review stages existed, so it has none.</p>;
@@ -72,12 +83,23 @@ export function StageList({ supabase, stages, answers, form, reviewAnswers, ques
                 .filter(Boolean)
                 .join(' · ');
           return (
-            <li key={stage.id} className={`stage-item${yourTurn ? ' your-turn' : ''}${isOpen ? ' is-open' : ''}`}>
+            <li key={stage.id} id={`stage-${stage.id}`} className={`stage-item${yourTurn ? ' your-turn' : ''}${isOpen ? ' is-open' : ''}`}>
               <div className="stage-row">
                 <span className="stage-main">
                   <span className="stage-name">
                     {stage.name}
                     {yourTurn && <span className="your-turn-tag">Your review</span>}
+                    {(() => {
+                      const own = exceptions.filter((e) => e.stage_id === stage.id && (e.status === 'pending' || e.status === 'approved'));
+                      if (own.length === 0) return null;
+                      const waiting = own.some((e) => e.status === 'pending');
+                      return (
+                        <span className="status-badge exception-badge" data-tone="waiting">
+                          {own.length} {own.length === 1 ? 'exception' : 'exceptions'}
+                          {waiting ? ', waiting' : ''}
+                        </span>
+                      );
+                    })()}
                   </span>
                   <span className="stage-meta">{meta}</span>
                 </span>
@@ -110,6 +132,7 @@ export function StageList({ supabase, stages, answers, form, reviewAnswers, ques
                   onTabChange={(t) => setTabs((cur) => ({ ...cur, [stage.id]: t }))}
                   controls={stage.name === 'Security review' ? securityControls : undefined}
                   controlsOpen={stage.name === 'Security review' ? securityControlsOpen : undefined}
+                  exceptions={exceptions.filter((e) => e.stage_id === stage.id)}
                   onChanged={onChanged}
                 />
               )}

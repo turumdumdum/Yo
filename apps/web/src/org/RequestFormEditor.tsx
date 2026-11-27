@@ -28,6 +28,7 @@ import {
   type StepDef,
 } from '@app/shared';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { AsanaImport } from './AsanaImport';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { FormError } from '../components/FormError';
 import { errorMessage } from '../lib/errors';
@@ -76,6 +77,8 @@ function changeType(field: FieldDef, type: FieldType): FieldDef {
     placeholder: field.placeholder,
     optional: field.optional,
     showWhen: field.showWhen,
+    // An imported question stays linked to its Asana field; repairRequestForm drops stale choice ids.
+    ...(field.source ? { source: field.source } : {}),
   };
   if (CHOICE_TYPES.includes(type)) {
     const options = 'options' in field ? field.options : optionsFromLines('Option 1\nOption 2');
@@ -94,6 +97,7 @@ const pointsLabel = (n: number) => (n === 0 ? 'No effect' : `+${n} ${n === 1 ? '
 
 function describeField(field: FieldDef, form: RequestFormDefinition): string {
   const parts = [FIELD_TYPE_LABELS[field.type], field.optional ? 'optional' : 'required'];
+  if (field.source?.system === 'asana') parts.push('from Asana');
   if (field.showWhen) {
     const controller = form.steps.flatMap((s) => s.fields).find((f) => f.key === field.showWhen!.field);
     parts.push(`only if “${controller?.label ?? field.showWhen.field}” is ${field.showWhen.in.join(' or ')}`);
@@ -507,6 +511,8 @@ interface FormEditorProps {
 function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
   const [draft, setDraft] = useState<Draft>(initial);
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const [importing, setImporting] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [dirty, setDirty] = useState(initial.id === null);
   const [error, setError] = useState<string | null>(null);
@@ -746,6 +752,32 @@ function FormEditor({ supabase, initial, onDone, onCancel }: FormEditorProps) {
           Preview
         </button>
       </div>
+
+      {mode === 'edit' && !importing && (
+        <div className="question-actions">
+          <button type="button" className="button button-secondary button-small" onClick={() => (setImporting(true), setImportNotice(null))}>
+            Import from Asana
+          </button>
+        </div>
+      )}
+      {mode === 'edit' && importing && (
+        <AsanaImport
+          supabase={supabase}
+          form={draft.definition}
+          onClose={() => setImporting(false)}
+          onImport={(next, summary) => {
+            setDefinition(next);
+            setImporting(false);
+            setImportNotice(summary);
+            setOpenSteps(new Set(next.steps.map((_, i) => i)));
+          }}
+        />
+      )}
+      {importNotice && (
+        <p className="notice notice-approved" role="status">
+          {importNotice}
+        </p>
+      )}
 
       {mode === 'preview' ? (
         <Preview form={draft.definition} />

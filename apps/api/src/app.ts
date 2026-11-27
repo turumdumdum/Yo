@@ -8,6 +8,7 @@ import { attachmentRoutes, type AttachmentStore } from './attachments';
 import type { Mailer } from './email';
 import { invitationRoutes, type InvitationStore } from './invitations';
 import { requestRoutes, type AfterSubmit, type RequestStore } from './requests';
+import { asanaRoutes } from './asana';
 import { integrationRoutes, type IntegrationRouteOptions } from './integrations';
 import type { SettingsResolver } from './orgSettings';
 import { bodyLimits, jsonOnly, noStore, rateLimit, type RateLimitRule } from './security';
@@ -86,6 +87,11 @@ export function createApp(options: AppOptions = {}) {
   if (options.integrations && options.requests && options.admin && options.webOrigin) {
     const admin = options.admin;
     app.route('/v1', integrationRoutes({ ...options.integrations, requests: options.requests, getCaller: (t) => admin.getCaller(t), webOrigin: options.webOrigin }));
+    const integ = options.integrations;
+    app.route(
+      '/v1',
+      asanaRoutes({ store: integ.store, key: integ.key, getCaller: (t) => admin.getCaller(t), invalidate: (orgId) => integ.settings.invalidate(orgId), fetchImpl: integ.fetchImpl }),
+    );
   }
   if (options.invitations && options.webOrigin) {
     const settings = options.settings;

@@ -1,5 +1,6 @@
 import { ATTACHMENT_BUCKET } from '@app/shared';
 import type {
+  AsanaField,
   AiCheckSettings,
   ConfigRequirement,
   ExceptionStatus,
@@ -294,6 +295,8 @@ const AI_OFF: AiStatus = { enabled: false, provider: null };
 
 /** Starting a job and each poll are short requests; a poll waits up to ~20 s on the server. */
 const AI_REQUEST_TIMEOUT_MS = 45_000;
+/** Language-model providers answer the first request directly (up to ~90 s on the server). */
+const AI_START_TIMEOUT_MS = 120_000;
 /** How long the browser keeps asking before it gives up on a job. */
 const AI_MAX_WAIT_MS = 6 * 60_000;
 const AI_POLL_PAUSE_MS = 2_000;
@@ -313,7 +316,7 @@ const aborted = () => new SubmitError('The AI request was cancelled.');
  */
 async function runAi<T>(supabase: SupabaseClient, id: string, kind: 'check' | 'suggestions', fallback: string, options: AiRunOptions): Promise<T> {
   const startedAt = Date.now();
-  let res = await callApi(supabase, `/v1/requests/${id}/ai/${kind}`, 'POST', AI_REQUEST_TIMEOUT_MS);
+  let res = await callApi(supabase, `/v1/requests/${id}/ai/${kind}`, 'POST', AI_START_TIMEOUT_MS);
   if (res.status !== 202) {
     if (!res.ok) throw await apiError(res, fallback);
     return (await res.json()) as T;
@@ -562,8 +565,14 @@ export async function resetAiSettings(supabase: SupabaseClient): Promise<void> {
 export interface ReviewException {
   id: string;
   request_id: string;
-  control_id: string;
-  control_title: string;
+  /** The review the exception was raised in (null only for very old rows). */
+  stage_id: string | null;
+  stage_name: string | null;
+  /** Short name of the exception; older rows only have the control title. */
+  title: string | null;
+  checklist_item: string | null;
+  control_id: string | null;
+  control_title: string | null;
   deviation: string;
   justification: string;
   compensating_controls: string;
@@ -579,7 +588,7 @@ export interface ReviewException {
 }
 
 const EXCEPTION_COLUMNS =
-  'id,request_id,control_id,control_title,deviation,justification,compensating_controls,risk_level,expires_on,status,requested_by,decided_by,decided_at,decision_comment,created_at';
+  'id,request_id,stage_id,stage_name,title,checklist_item,control_id,control_title,deviation,justification,compensating_controls,risk_level,expires_on,status,requested_by,decided_by,decided_at,decision_comment,created_at';
 
 export async function listExceptions(supabase: SupabaseClient, requestId: string): Promise<ReviewException[]> {
   const { data, error } = await supabase.from('review_exceptions').select(EXCEPTION_COLUMNS).eq('request_id', requestId).order('created_at');
@@ -621,6 +630,36 @@ export async function requestException(supabase: SupabaseClient, requestId: stri
     p_compensating: input.compensating,
     p_risk_level: input.riskLevel,
     p_expires_on: input.expiresOn,
+  });
+  if (error) throw error;
+}
+
+/** What an exception is called: its title, else the control it waives. */
+export const exceptionTitle = (e: Pick<ReviewException, 'title' | 'control_title'>) => e.title || e.control_title || 'Exception';
+
+export interface StageExceptionInput {
+  title: string;
+  deviation: string;
+  justification: string;
+  compensating: string;
+  riskLevel: string;
+  expiresOn: string;
+  controlId: string | null;
+  checklistItem: string | null;
+}
+
+/** The reviewer of any stage raises an exception there; an org admin other than them decides. */
+export async function raiseStageException(supabase: SupabaseClient, stageId: string, input: StageExceptionInput): Promise<void> {
+  const { error } = await supabase.rpc('raise_stage_exception', {
+    p_stage_id: stageId,
+    p_title: input.title,
+    p_deviation: input.deviation,
+    p_justification: input.justification,
+    p_compensating: input.compensating,
+    p_risk_level: input.riskLevel,
+    p_expires_on: input.expiresOn,
+    p_control_id: input.controlId,
+    p_checklist_item: input.checklistItem,
   });
   if (error) throw error;
 }
@@ -688,7 +727,16 @@ export interface IntegrationsStatus {
   encryptionReady: boolean;
   server: { publicApiUrl: string; source: SettingSource };
   email: { provider: 'off' | 'resend' | 'smtp' | 'log'; from: string; configured: boolean; source: SettingSource };
-  ai: { provider: 'off' | 'parallel'; processor: string; configured: boolean; source: SettingSource };
+  ai: {
+    provider: AiProviderName;
+    processor: string;
+    model?: string;
+    baseUrl?: string;
+    configured: boolean;
+    source: SettingSource;
+    /** Providers with a saved key (never the key itself). */
+    savedKeys?: AiProviderName[];
+  };
   slack: { enabled: boolean; configured: boolean; events: string[] };
   upguard: { enabled: boolean; configured: boolean };
   reviewServices: ReviewServiceStatus[];
@@ -715,6 +763,54 @@ export async function saveUpguard(supabase: SupabaseClient, body: { enabled: boo
   if (!res.ok) throw await apiError(res, 'The UpGuard settings could not be saved.');
 }
 
+// --- Asana (import project fields into the request form) ---
+
+export interface AsanaStatus {
+  encryptionReady: boolean;
+  configured: boolean;
+  workspaceGid: string | null;
+  workspaceName: string | null;
+}
+export interface AsanaPlace {
+  gid: string;
+  name: string;
+}
+
+async function asanaGet<T>(supabase: SupabaseClient, path: string, fallback: string): Promise<T> {
+  const res = await callApi(supabase, `/v1/integrations/asana${path}`, 'GET');
+  if (!res.ok) throw await apiError(res, fallback);
+  return (await res.json()) as T;
+}
+
+export const loadAsanaStatus = (supabase: SupabaseClient) => asanaGet<AsanaStatus>(supabase, '', 'The Asana settings could not be loaded.');
+
+/** Checks the token with Asana and saves it; the token is never sent back. */
+export async function saveAsana(supabase: SupabaseClient, body: { token?: string; workspaceGid?: string | null }): Promise<{ user: string; workspaces: AsanaPlace[] }> {
+  const res = await callApi(supabase, '/v1/integrations/asana', 'PUT', 30_000, body);
+  if (!res.ok) throw await apiError(res, 'The Asana settings could not be saved.');
+  return (await res.json()) as { user: string; workspaces: AsanaPlace[] };
+}
+
+export async function removeAsana(supabase: SupabaseClient): Promise<void> {
+  const res = await callApi(supabase, '/v1/integrations/asana', 'DELETE');
+  if (!res.ok) throw await apiError(res, 'Asana could not be disconnected.');
+}
+
+export async function testAsana(supabase: SupabaseClient): Promise<{ user: string; workspaces: number }> {
+  const res = await callApi(supabase, '/v1/integrations/asana/test', 'POST', 30_000, {});
+  if (!res.ok) throw await apiError(res, 'Asana could not be reached.');
+  return (await res.json()) as { user: string; workspaces: number };
+}
+
+export const listAsanaWorkspaces = (supabase: SupabaseClient) =>
+  asanaGet<{ workspaces: AsanaPlace[]; selected: string | null }>(supabase, '/workspaces', 'The Asana workspaces could not be loaded.');
+
+export const listAsanaProjects = async (supabase: SupabaseClient, workspaceGid: string) =>
+  (await asanaGet<{ projects: AsanaPlace[] }>(supabase, `/workspaces/${encodeURIComponent(workspaceGid)}/projects`, 'The Asana projects could not be loaded.')).projects;
+
+export const listAsanaFields = async (supabase: SupabaseClient, projectGid: string) =>
+  (await asanaGet<{ fields: AsanaField[] }>(supabase, `/projects/${encodeURIComponent(projectGid)}/fields`, 'The project fields could not be loaded.')).fields;
+
 async function sendJson<T = unknown>(supabase: SupabaseClient, path: string, method: 'POST' | 'PUT' | 'DELETE', body: unknown, fallback: string): Promise<T> {
   const res = await callApi(supabase, path, method, 30_000, method === 'DELETE' ? undefined : body);
   if (!res.ok) throw await apiError(res, fallback);
@@ -729,7 +825,9 @@ export const saveEmailSettings = (supabase: SupabaseClient, body: { provider: st
 
 export const testEmail = (supabase: SupabaseClient) => sendJson(supabase, '/v1/integrations/email/test', 'POST', {}, 'The test email could not be sent.');
 
-export const saveAiProvider = (supabase: SupabaseClient, body: { provider: string; processor?: string; apiKey?: string }) =>
+export type AiProviderName = 'off' | 'parallel' | 'anthropic' | 'openai' | 'openai_compatible';
+
+export const saveAiProvider = (supabase: SupabaseClient, body: { provider: string; processor?: string; apiKey?: string; model?: string; baseUrl?: string }) =>
   sendJson(supabase, '/v1/integrations/ai', 'PUT', body, 'The AI settings could not be saved.');
 
 export interface ReviewServiceInput {

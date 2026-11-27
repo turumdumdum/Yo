@@ -617,10 +617,44 @@ describe('settings in the UI, with the environment as fallback', () => {
     expect(JSON.stringify(s.saved)).not.toContain('par-123456789');
     expect(JSON.parse(await decrypt((await key)!, s.integration!.secrets!)).parallelApiKey).toBe('par-123456789');
     const view = (await (await call('GET', '/v1/integrations')).json()) as { ai: unknown };
-    expect(view.ai).toEqual({ provider: 'parallel', processor: 'lite', configured: true, source: 'settings' });
+    expect(view.ai).toEqual({ provider: 'parallel', processor: 'lite', model: '', baseUrl: '', configured: true, source: 'settings', savedKeys: ['parallel'] });
     expect(await (await app.request('/v1/ai', { headers: { authorization: 'Bearer t' } })).json()).toMatchObject({ enabled: true });
     expect(await (await app.request('/v1/ai')).json()).toMatchObject({ enabled: false });
     expect((await setup({ caller: { ...admin, role: 'reviewer' } }).call('PUT', '/v1/integrations/ai', { provider: 'off' })).status).toBe(403);
+  });
+
+  it('accepts Anthropic, OpenAI and OpenAI-compatible providers, each with its own key', async () => {
+    const { call, s, key } = setup();
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'anthropic' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'anthropic', apiKey: 'sk-ant-123456789', model: 'bad model!' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'anthropic', apiKey: 'sk-ant-123456789', model: 'claude-opus-5-5' })).status).toBe(200);
+    let view = (await (await call('GET', '/v1/integrations')).json()) as { ai: Record<string, unknown> };
+    expect(view.ai).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5-5', configured: true, savedKeys: ['anthropic'] });
+    expect(JSON.stringify(view)).not.toContain('sk-ant-123456789');
+
+    // OpenAI needs a model; switching keeps the Anthropic key.
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'openai', apiKey: 'sk-openai-12345' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'openai', apiKey: 'sk-openai-12345', model: 'some-model' })).status).toBe(200);
+    const secrets = JSON.parse(await decrypt((await key)!, s.integration!.secrets!));
+    expect(secrets).toMatchObject({ anthropicApiKey: 'sk-ant-123456789', openaiApiKey: 'sk-openai-12345' });
+
+    // Compatible servers: https, or a local address only when allowed. The key is optional.
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'openai_compatible', model: 'llama3.1', baseUrl: 'ftp://x.example' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'openai_compatible', model: 'llama3.1', baseUrl: 'http://gateway.example/v1' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'openai_compatible', model: 'llama3.1', baseUrl: 'http://localhost:11434/v1' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'openai_compatible', baseUrl: 'https://openrouter.example/api/v1' })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'openai_compatible', model: 'llama3.1', baseUrl: 'https://openrouter.example/api/v1/' })).status).toBe(200);
+    view = (await (await call('GET', '/v1/integrations')).json()) as { ai: Record<string, unknown> };
+    expect(view.ai).toMatchObject({ provider: 'openai_compatible', model: 'llama3.1', baseUrl: 'https://openrouter.example/api/v1', configured: true });
+
+    const local = setup({ allowLocal: true });
+    expect((await local.call('PUT', '/v1/integrations/ai', { provider: 'openai_compatible', model: 'llama3.1', baseUrl: 'http://localhost:11434/v1' })).status).toBe(200);
+  });
+
+  it('reads the provider from the environment when nothing is saved', async () => {
+    const { call } = setup({ env: { AI_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'sk-ant-env-1234', AI_MODEL: 'claude-sonnet-5-5' } });
+    const view = (await (await call('GET', '/v1/integrations')).json()) as { ai: Record<string, unknown> };
+    expect(view.ai).toMatchObject({ provider: 'anthropic', model: 'claude-sonnet-5-5', configured: true, source: 'env' });
   });
 
   it('caches per organization for a short time and drops the cache on save', async () => {

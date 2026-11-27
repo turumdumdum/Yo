@@ -108,7 +108,8 @@ export function SecurityConfig({ supabase, request, stages, context, onChanged, 
 
   const reloadExceptions = useCallback(async () => {
     try {
-      setExceptions(await listExceptions(supabase, request.id));
+      // Exceptions that waive a control; other exceptions are listed with their review.
+      setExceptions((await listExceptions(supabase, request.id)).filter((e) => e.control_id !== null));
     } catch (e) {
       setError(errorMessage(e));
     }

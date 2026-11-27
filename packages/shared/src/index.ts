@@ -14,3 +14,4 @@ export * from './stageSettings';
 export * from './securityBaseline';
 export * from './externalReview';
 export * from './reviewServices';
+export * from './asana';
