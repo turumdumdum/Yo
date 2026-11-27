@@ -6,6 +6,8 @@ import {
   loadAsanaStatus,
   loadIntegrations,
   saveAiProvider,
+  testAiProvider,
+  removeAiKey,
   saveEmailSettings,
   saveServerSettings,
   saveSlack,
@@ -117,7 +119,8 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
 
   const [server, setServer] = useState({ publicApiUrl: '' });
   const [email, setEmail] = useState({ provider: 'off', from: '', resendApiKey: '', smtpUrl: '' });
-  const [ai, setAi] = useState({ provider: 'off', processor: 'base', apiKey: '', model: '', baseUrl: '' });
+  const [aiTest, setAiTest] = useState<string | null>(null);
+  const [ai, setAi] = useState({ provider: 'off', processor: 'base', apiKey: '', model: '', baseUrl: '', timeout: '' });
   const [slack, setSlack] = useState({ enabled: false, events: [] as string[], webhookUrl: '' });
   const [upguard, setUpguard] = useState({ enabled: false, apiKey: '' });
   // Integrations opened from "Add an integration" in this visit.
@@ -129,7 +132,7 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
       setStatus(s);
       setServer({ publicApiUrl: s.server?.publicApiUrl ?? '' });
       setEmail({ provider: s.email?.provider ?? 'off', from: s.email?.from ?? '', resendApiKey: '', smtpUrl: '' });
-      setAi({ provider: s.ai?.provider ?? 'off', processor: s.ai?.processor || 'base', apiKey: '', model: s.ai?.model ?? '', baseUrl: s.ai?.baseUrl ?? '' });
+      setAi({ provider: s.ai?.provider ?? 'off', processor: s.ai?.processor || 'base', apiKey: '', model: s.ai?.model ?? '', baseUrl: s.ai?.baseUrl ?? '', timeout: s.ai?.timeoutSeconds ? String(s.ai.timeoutSeconds) : '' });
       setSlack({ enabled: s.slack.enabled, events: s.slack.events, webhookUrl: '' });
       setUpguard({ enabled: s.upguard.enabled, apiKey: '' });
     } catch (e) {
@@ -320,6 +323,49 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
                 onChange={(v) => setAi({ ...ai, apiKey: v })}
               />
             )}
+            {ai.provider !== 'off' && (
+              <details className="format-help">
+                <summary>Advanced</summary>
+                <div className="field">
+                  <label htmlFor="ai-timeout">Time limit for one answer (seconds)</label>
+                  <input
+                    id="ai-timeout"
+                    type="number"
+                    inputMode="numeric"
+                    min={10}
+                    max={300}
+                    value={ai.timeout}
+                    placeholder={ai.provider === 'parallel' ? '110' : '90'}
+                    onChange={(e) => setAi({ ...ai, timeout: e.target.value })}
+                  />
+                  <p className="field-hint">From 10 to 300. Empty uses the default. A slow local model may need more.</p>
+                </div>
+                {(status.ai?.savedKeys ?? []).length > 0 && (
+                  <div className="field">
+                    <span className="field-label">Saved keys</span>
+                    <ul className="plain-list">
+                      {(status.ai?.savedKeys ?? []).map((p) => (
+                        <li key={p}>
+                          {AI_LABEL[p] ?? p}: saved, encrypted{' '}
+                          <button
+                            type="button"
+                            className="link-button"
+                            disabled={busy}
+                            onClick={() => {
+                              if (!window.confirm(`Delete the saved ${AI_LABEL[p] ?? p} key?${status.ai?.provider === p ? ' AI is turned off until a new key is saved.' : ''}`)) return;
+                              void run(() => removeAiKey(supabase, p), `${AI_LABEL[p] ?? p} key deleted.`);
+                            }}
+                          >
+                            Delete key<span className="visually-hidden"> for {AI_LABEL[p] ?? p}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="field-hint">Keys are stored encrypted on the server and are never shown again, not even to admins. To change one, type a new key above.</p>
+                  </div>
+                )}
+              </details>
+            )}
             {(ai.provider === 'anthropic' || ai.provider === 'openai' || ai.provider === 'openai_compatible') && (
               <p className="field-hint">These models have no web access: vendor details they suggest come from what the model knows. Check them before accepting.</p>
             )}
@@ -336,6 +382,7 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
                       ...(ai.provider === 'anthropic' || ai.provider === 'openai' || ai.provider === 'openai_compatible' ? { model: ai.model.trim() } : {}),
                       ...(ai.provider === 'openai_compatible' ? { baseUrl: ai.baseUrl.trim() } : {}),
                       apiKey: secret(ai.apiKey),
+                      ...(ai.provider !== 'off' ? { timeoutSeconds: ai.timeout.trim() ? Number(ai.timeout) : null } : {}),
                     }),
                   'AI settings saved.',
                 )
@@ -343,6 +390,22 @@ export function IntegrationsSection({ supabase }: { supabase: SupabaseClient }) 
             >
               Save AI settings
             </button>
+            {status.ai?.configured && status.ai.provider !== 'off' && (
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    const r = await testAiProvider(supabase);
+                    setAiTest(`${r.provider} answered in ${r.seconds} s.`);
+                  }, 'Connection works.')
+                }
+              >
+                Test connection
+              </button>
+            )}
+            {aiTest && <p className="field-hint">{aiTest}</p>}
           </Card>
         ),
       },

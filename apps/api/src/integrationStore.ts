@@ -27,7 +27,7 @@ export interface IntegrationConfig {
   /** Asana, for importing project fields into the request form. The token is a secret. */
   asana?: { workspaceGid: string | null; workspaceName: string | null };
   /** model: Anthropic/OpenAI/compatible; baseUrl: OpenAI-compatible servers only. */
-  ai?: { provider: AiProviderName; processor: AiProcessor; model?: string; baseUrl?: string };
+  ai?: { provider: AiProviderName; processor: AiProcessor; model?: string; baseUrl?: string; /** 10-300 s; the provider default when absent. */ timeoutSeconds?: number };
 }
 
 /** Saved encrypted, as one JSON object. */

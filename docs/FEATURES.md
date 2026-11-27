@@ -95,7 +95,28 @@ Everything is set up in **Admin → Integrations**: the server address, email, A
 | Slack | Posts notifications to a channel (submitted, decided, exceptions, …) | Incoming webhook; confidential requests are not named |
 | UpGuard | Shows the vendor's external security rating on the request | The API endpoint and fields were written without access to UpGuard's documentation and **must be verified** before use |
 | VirusTotal | A link to the vendor's domain report | No key needed; opens virustotal.com |
+| Asana | Imports the custom fields of an Asana project, with all their values, as questions of the request form | Personal access token, checked with Asana before it is saved. See [Importing fields from Asana](#importing-fields-from-asana) |
 | Review services | Each review can run in its own external service (for example `review.testx.com`). This app sends the review there and shows the status it reports back | One connection per service, each with its own signing secret, Test connection and a delivery log. The service either gets the data in the event (push) or reads it from our API and keeps its own database (pull). See [external-review.md](external-review.md) |
+
+### Importing fields from Asana
+
+Companies that already track vendors in Asana can reuse their project's custom fields as questions.
+
+1. **Create a token.** In Asana open the [developer console](https://app.asana.com/0/my-apps) (profile picture → Settings → Apps → Developer apps), choose **Create new token** and copy it. Asana shows it only once. The token can read everything its user sees, so prefer an account that only sees the projects you import from.
+2. **Connect.** Admin → Integrations → Add an integration → **Asana**: paste the token and choose **Save and check token**. The API checks it with Asana (`GET /users/me`), stores it encrypted and never shows it again. With one workspace it becomes the default.
+3. **Import.** Admin → Request form → edit your own version → **Import from Asana**: pick the workspace and project, tick the fields, choose the step for new questions, then **Import** and **Save form**.
+
+| Asana field | Becomes |
+| --- | --- |
+| Single-select (enum) | One choice: buttons up to 4 values, a drop-down list above |
+| Multi-select (multi_enum) | Several choices |
+| Text | Short text |
+| Number | Whole number; numbers with decimals become short text |
+| Date | Date |
+| People | Short text ("Name or email") |
+| Formula, custom ID and other types | Not imported (shown, but cannot be ticked) |
+
+Values that are turned off in Asana are left out unless you tick "Also import values that are turned off". Fields marked important in Asana become required questions. Each imported question remembers its Asana field and value ids (`source` in the form definition), so importing the same field again updates its values instead of adding a copy; risk settings of values that still exist are kept. Answers are not sent to Asana: this is a one-way import of the form's structure.
 
 ---
 
@@ -129,6 +150,7 @@ The browser talks only to the API and to Supabase with the user's own token. Thi
 | Invitations | `inviteImport.ts` | `invitations.ts`, `email.ts`, `smtp.ts` | `org/InviteSection.tsx` | `invitations` |
 | AI plugin | `ai.ts` | `ai/*` (`/v1/ai-settings`) | `requests/AiAssist.tsx`, `org/AiSettingsSection.tsx` | `ai_settings` |
 | Integrations | — | integration routes, dispatcher, crypto | Admin → Integrations | `integration_settings`, `outbound_events`, `inbound_events`, `notification_cursors`, `vendor_risk_checks`, `request_stages.external*` |
+| Asana field import | `asana.ts` (normalize, map, merge) | `asana.ts` (`/v1/integrations/asana/*`) | `org/AsanaCard.tsx`, `org/AsanaImport.tsx` | `integration_settings` (token encrypted) |
 | Audit log | — | writes on admin changes | — | `audit_log` (append-only) |
 
 Migrations are in `supabase/migrations`, named by date; each one comes with tests in `supabase/tests`.
@@ -141,7 +163,7 @@ Migrations are in `supabase/migrations`, named by date; each one comes with test
 | Tenant isolation | `org_id` on every tenant table, RLS everywhere; tests prove org A cannot see org B, and that every public table is covered |
 | Least privilege | Writes go through checked database functions or the API; browser roles have column-level grants only |
 | Server secrets | The Supabase secret key lives only on the API server (`apps/api/.env`, git-ignored) |
-| Integration secrets | Slack webhook, UpGuard key and external signing secrets are encrypted by the API (AES-256-GCM) before storage; the table is service-role only |
+| Integration secrets | Slack webhook, UpGuard key, Asana token and external signing secrets are encrypted by the API (AES-256-GCM) before storage; the table is service-role only |
 | Webhooks | Outgoing and incoming calls with the external review service are signed (HMAC-SHA256 with timestamp), replays rejected, idempotent by event id |
 | API | Rate limits, body size limits, strict CORS, security headers (CSP, HSTS), generic error messages |
 | Audit | Append-only log of sign-in-relevant, admin, review, exception, export and deletion events |

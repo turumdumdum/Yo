@@ -1,3 +1,4 @@
+import { AiProviderError } from './ai/provider';
 import { ORG_ROLES, parseExternalStatusUpdate, parseReviewServiceInput, parseWorkflowSettings, reviewServiceId, type ReviewService } from '@app/shared';
 import { Hono, type Context } from 'hono';
 import type { Caller } from './admin';
@@ -75,6 +76,19 @@ export interface IntegrationRouteOptions {
   allowLocalServiceUrls?: boolean;
   fetchImpl?: typeof fetch;
   now?: () => number;
+}
+
+const AI_KEY_FIELD = { parallel: 'parallelApiKey', anthropic: 'anthropicApiKey', openai: 'openaiApiKey', openai_compatible: 'openaiCompatibleApiKey' } as const;
+
+/** Rejects values that cannot be a key for this provider, before anything is stored. */
+export function aiKeyProblem(provider: string, value: unknown): string | null {
+  if (typeof value !== 'string') return 'Enter a valid API key';
+  const key = value.trim();
+  if (key.length < 8 || key.length > 500) return 'Enter a valid API key';
+  if (!/^[\x21-\x7e]+$/.test(key)) return 'An API key has no spaces or special characters; paste it again';
+  if (provider === 'anthropic' && !key.startsWith('sk-ant-')) return 'An Anthropic API key starts with sk-ant-';
+  if (provider === 'openai' && !key.startsWith('sk-')) return 'An OpenAI API key starts with sk-';
+  return null;
 }
 
 export function integrationRoutes(o: IntegrationRouteOptions) {
@@ -157,6 +171,7 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
         source: r.aiInfo.source,
         // Which providers have a saved key; the keys themselves never leave the server.
         savedKeys: r.aiInfo.savedKeys,
+        timeoutSeconds: r.aiInfo.timeoutSeconds,
       },
       slack: { enabled: !!config.slack?.enabled, configured: !!secrets.slackWebhookUrl, events: config.slack?.events ?? [...SLACK_EVENTS] },
       upguard: { enabled: !!config.upguard?.enabled, configured: !!secrets.upguardApiKey },
@@ -316,7 +331,14 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
     const provider = b.provider as AiProviderName;
     const processor = b.processor === undefined ? 'base' : b.processor;
     if (!(AI_PROCESSORS as readonly unknown[]).includes(processor)) return c.json({ error: 'Choose lite, base or core' }, 422);
-    if (b.apiKey !== undefined && (typeof b.apiKey !== 'string' || b.apiKey.trim().length < 8 || b.apiKey.length > 500)) return c.json({ error: 'Enter a valid API key' }, 422);
+    if (b.apiKey !== undefined) {
+      const problem = aiKeyProblem(provider, b.apiKey);
+      if (problem) return c.json({ error: problem }, 422);
+    }
+    if (b.timeoutSeconds !== undefined && b.timeoutSeconds !== null && (!Number.isInteger(b.timeoutSeconds) || (b.timeoutSeconds as number) < 10 || (b.timeoutSeconds as number) > 300)) {
+      return c.json({ error: 'The time limit must be a whole number of seconds from 10 to 300' }, 422);
+    }
+    const timeoutSeconds = typeof b.timeoutSeconds === 'number' ? b.timeoutSeconds : undefined;
     if (b.model !== undefined && (typeof b.model !== 'string' || b.model.length > 120 || !/^[\w.:/@-]*$/.test(b.model.trim()))) {
       return c.json({ error: 'Enter the model name, for example claude-opus-5-5' }, 422);
     }
@@ -341,15 +363,64 @@ export function integrationRoutes(o: IntegrationRouteOptions) {
     if ((provider === 'parallel' || provider === 'anthropic' || provider === 'openai') && keyField && !next[keyField]) {
       return c.json({ error: `Enter the ${provider === 'parallel' ? 'Parallel' : provider === 'anthropic' ? 'Anthropic' : 'OpenAI'} API key` }, 422);
     }
-    const ai = { provider, processor: processor as AiProcessor, ...(model ? { model } : {}), ...(baseUrl ? { baseUrl } : {}) };
+    const ai = { provider, processor: processor as AiProcessor, ...(model ? { model } : {}), ...(baseUrl ? { baseUrl } : {}), ...(timeoutSeconds ? { timeoutSeconds } : {}) };
     await saveAll(who.orgId, { ...config, ai }, next, who.userId, 'integration.ai_updated', {
       provider,
       processor,
       model: model || null,
       base_url: baseUrl || null,
       key_changed: typeof b.apiKey === 'string',
+      timeout_seconds: timeoutSeconds ?? null,
     });
     return c.json({ ok: true });
+  });
+
+  /** Deletes one provider's saved key. If that provider is in use, AI is turned off. */
+  routes.delete('/integrations/ai/keys/:provider', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const missing = await needKey(c);
+    if (missing) return missing;
+    const provider = c.req.param('provider');
+    const keyField = AI_KEY_FIELD[provider as keyof typeof AI_KEY_FIELD];
+    if (!keyField) return c.json({ error: 'Unknown provider' }, 404);
+    const { config, secrets } = await load(who.orgId);
+    const next: IntegrationSecrets = { ...secrets };
+    delete next[keyField];
+    const inUse = config.ai?.provider === provider;
+    const nextConfig: IntegrationConfig = inUse ? { ...config, ai: { ...config.ai!, provider: 'off' } } : config;
+    await saveAll(who.orgId, nextConfig, next, who.userId, 'integration.ai_key_removed', { provider, ai_turned_off: inUse });
+    return c.json({ ok: true, aiTurnedOff: inUse });
+  });
+
+  /**
+   * Sends a tiny fixed question to the saved provider: proves the key, model and address
+   * work. No request data is sent. At most one test per organization every 10 seconds.
+   */
+  const lastAiTest = new Map<string, number>();
+  routes.post('/integrations/ai/test', async (c) => {
+    const who = await admin(c);
+    if (who instanceof Response) return who;
+    const t = now();
+    if (t - (lastAiTest.get(who.orgId) ?? 0) < 10_000) return c.json({ error: 'Wait a few seconds before testing again' }, 429);
+    if (lastAiTest.size > 10_000) lastAiTest.clear();
+    lastAiTest.set(who.orgId, t);
+    const resolved = await o.settings.forOrg(who.orgId);
+    if (!resolved.ai) return c.json({ error: 'Save a provider with its key (and model) first' }, 422);
+    const started = now();
+    try {
+      const result = await resolved.ai.run({
+        instructions: 'This is a connection test. Answer with ok set to true.',
+        input: { test: true },
+        outputSchema: { type: 'object', additionalProperties: false, required: ['ok'], properties: { ok: { type: 'boolean' } } },
+        processor: 'lite',
+      });
+      if (result.content.ok !== true) return c.json({ error: 'The provider answered, but not in the expected format. Check the model name.' }, 502);
+    } catch (error) {
+      const message = error instanceof AiProviderError ? error.message : 'The provider could not be reached';
+      return c.json({ error: message }, 502);
+    }
+    return c.json({ ok: true, provider: resolved.ai.name, seconds: Math.max(1, Math.round((now() - started) / 1000)) });
   });
 
   // ---------------------------------------------------------------------------

@@ -17,6 +17,8 @@ export interface AiProviderSettings {
   model?: string;
   /** Parallel (optional) and OpenAI-compatible servers (required). */
   baseUrl?: string;
+  /** How long one answer may take; the provider default when absent. */
+  timeoutSeconds?: number;
 }
 
 /** Whether these settings are complete enough to call the provider. */
@@ -36,15 +38,16 @@ export function aiConfigured(s: AiProviderSettings): boolean {
 
 export function buildAiProvider(s: AiProviderSettings, fetchImpl: typeof fetch = fetch): AiProvider | undefined {
   if (!aiConfigured(s)) return undefined;
+  const timeoutMs = s.timeoutSeconds ? s.timeoutSeconds * 1000 : undefined;
   switch (s.provider) {
     case 'parallel':
-      return parallelProvider({ apiKey: s.apiKey!, processor: s.processor, baseUrl: s.baseUrl }, fetchImpl);
+      return parallelProvider({ apiKey: s.apiKey!, processor: s.processor, baseUrl: s.baseUrl, timeoutMs }, fetchImpl);
     case 'anthropic':
-      return anthropicProvider({ apiKey: s.apiKey!, model: s.model, fetchImpl });
+      return anthropicProvider({ apiKey: s.apiKey!, model: s.model, fetchImpl, timeoutMs });
     case 'openai':
-      return openAiProvider({ apiKey: s.apiKey, model: s.model!, name: 'OpenAI' }, fetchImpl);
+      return openAiProvider({ apiKey: s.apiKey, model: s.model!, name: 'OpenAI', timeoutMs }, fetchImpl);
     case 'openai_compatible':
-      return openAiProvider({ apiKey: s.apiKey, model: s.model!, baseUrl: s.baseUrl, strictSchema: false, name: providerHostName(s.baseUrl!) }, fetchImpl);
+      return openAiProvider({ apiKey: s.apiKey, model: s.model!, baseUrl: s.baseUrl, strictSchema: false, name: providerHostName(s.baseUrl!), timeoutMs }, fetchImpl);
     default:
       return undefined;
   }

@@ -736,6 +736,8 @@ export interface IntegrationsStatus {
     source: SettingSource;
     /** Providers with a saved key (never the key itself). */
     savedKeys?: AiProviderName[];
+    /** Time limit for one answer in seconds; null = provider default. */
+    timeoutSeconds?: number | null;
   };
   slack: { enabled: boolean; configured: boolean; events: string[] };
   upguard: { enabled: boolean; configured: boolean };
@@ -827,8 +829,18 @@ export const testEmail = (supabase: SupabaseClient) => sendJson(supabase, '/v1/i
 
 export type AiProviderName = 'off' | 'parallel' | 'anthropic' | 'openai' | 'openai_compatible';
 
-export const saveAiProvider = (supabase: SupabaseClient, body: { provider: string; processor?: string; apiKey?: string; model?: string; baseUrl?: string }) =>
-  sendJson(supabase, '/v1/integrations/ai', 'PUT', body, 'The AI settings could not be saved.');
+export const saveAiProvider = (
+  supabase: SupabaseClient,
+  body: { provider: string; processor?: string; apiKey?: string; model?: string; baseUrl?: string; timeoutSeconds?: number | null },
+) => sendJson(supabase, '/v1/integrations/ai', 'PUT', body, 'The AI settings could not be saved.');
+
+/** Sends a fixed test question (no request data) to the saved provider. */
+export const testAiProvider = (supabase: SupabaseClient) =>
+  sendJson<{ ok: boolean; provider: string; seconds: number }>(supabase, '/v1/integrations/ai/test', 'POST', {}, 'The AI provider could not be reached.');
+
+/** Deletes one provider's saved key; AI turns off if that provider was in use. */
+export const removeAiKey = (supabase: SupabaseClient, provider: AiProviderName) =>
+  sendJson<{ aiTurnedOff: boolean }>(supabase, `/v1/integrations/ai/keys/${encodeURIComponent(provider)}`, 'DELETE', {}, 'The key could not be removed.');
 
 export interface ReviewServiceInput {
   name: string;

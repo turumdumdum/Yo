@@ -2876,3 +2876,11 @@ section + .card {
 .exception-facts .link-button {
   min-height: 0;
 }
+.field-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+.integration-add-item strong {
+  display: block;
+}

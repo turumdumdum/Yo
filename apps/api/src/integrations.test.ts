@@ -1,3 +1,4 @@
+import { aiKeyProblem } from './integrations';
 import { defaultWorkflowSettings, type WorkflowSettings } from '@app/shared';
 import { describe, expect, it } from 'vitest';
 import { createApp } from './app';
@@ -137,6 +138,7 @@ function setup(
     env?: Record<string, string>;
     smtp?: boolean;
     allowLocal?: boolean;
+    now?: () => number;
   } = {},
 ) {
   const { s, store } = memoryStore();
@@ -183,6 +185,7 @@ function setup(
       settings,
       smtpSupported: !!options.smtp,
       allowLocalServiceUrls: !!options.allowLocal,
+      now: options.now,
     },
     settings,
     rateLimits: options.rateLimits,
@@ -617,7 +620,7 @@ describe('settings in the UI, with the environment as fallback', () => {
     expect(JSON.stringify(s.saved)).not.toContain('par-123456789');
     expect(JSON.parse(await decrypt((await key)!, s.integration!.secrets!)).parallelApiKey).toBe('par-123456789');
     const view = (await (await call('GET', '/v1/integrations')).json()) as { ai: unknown };
-    expect(view.ai).toEqual({ provider: 'parallel', processor: 'lite', model: '', baseUrl: '', configured: true, source: 'settings', savedKeys: ['parallel'] });
+    expect(view.ai).toEqual({ provider: 'parallel', processor: 'lite', model: '', baseUrl: '', configured: true, source: 'settings', savedKeys: ['parallel'], timeoutSeconds: null });
     expect(await (await app.request('/v1/ai', { headers: { authorization: 'Bearer t' } })).json()).toMatchObject({ enabled: true });
     expect(await (await app.request('/v1/ai')).json()).toMatchObject({ enabled: false });
     expect((await setup({ caller: { ...admin, role: 'reviewer' } }).call('PUT', '/v1/integrations/ai', { provider: 'off' })).status).toBe(403);
@@ -649,6 +652,36 @@ describe('settings in the UI, with the environment as fallback', () => {
 
     const local = setup({ allowLocal: true });
     expect((await local.call('PUT', '/v1/integrations/ai', { provider: 'openai_compatible', model: 'llama3.1', baseUrl: 'http://localhost:11434/v1' })).status).toBe(200);
+  });
+
+  it('checks key formats and the time limit, removes one key, and tests the connection', async () => {
+    const fetchImpl = (async (url: string | URL | Request) => {
+      if (String(url).includes('/chat/completions')) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }] }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+    let t = 1_000_000;
+    const { call, s, key } = setup({ fetchImpl, now: () => t });
+    expect(aiKeyProblem('anthropic', 'sk-other-123456789')).toMatch(/sk-ant-/);
+    expect(aiKeyProblem('openai', 'key with spaces 123')).toMatch(/no spaces/);
+    expect(aiKeyProblem('openai', 'sk-proj-abcdefgh')).toBeNull();
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'openai', apiKey: 'sk-proj-abcdefgh', model: 'm', timeoutSeconds: 5 })).status).toBe(422);
+    expect((await call('PUT', '/v1/integrations/ai', { provider: 'openai', apiKey: 'sk-proj-abcdefgh', model: 'm', timeoutSeconds: 120 })).status).toBe(200);
+    const view = (await (await call('GET', '/v1/integrations')).json()) as { ai: Record<string, unknown> };
+    expect(view.ai).toMatchObject({ timeoutSeconds: 120 });
+
+    const test = await call('POST', '/v1/integrations/ai/test', {});
+    expect(test.status).toBe(200);
+    expect((await call('POST', '/v1/integrations/ai/test', {})).status).toBe(429);
+    t += 11_000;
+
+    expect((await call('DELETE', '/v1/integrations/ai/keys/nope')).status).toBe(404);
+    const removed = await call('DELETE', '/v1/integrations/ai/keys/openai');
+    expect(await removed.json()).toMatchObject({ aiTurnedOff: true });
+    const secrets = s.integration!.secrets ? JSON.parse(await decrypt((await key)!, s.integration!.secrets)) : {};
+    expect(secrets.openaiApiKey).toBeUndefined();
+    expect((await call('POST', '/v1/integrations/ai/test', {})).status).toBe(422);
   });
 
   it('reads the provider from the environment when nothing is saved', async () => {

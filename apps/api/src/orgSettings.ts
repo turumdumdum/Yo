@@ -56,7 +56,7 @@ export interface ResolvedSettings {
   mailer?: Mailer;
   email: { provider: EmailProviderName; from: string; configured: boolean; source: Source };
   ai?: AiProvider;
-  aiInfo: { provider: AiProviderName; processor: AiProcessor; model: string; baseUrl: string; configured: boolean; source: Source; savedKeys: AiProviderName[] };
+  aiInfo: { provider: AiProviderName; processor: AiProcessor; model: string; baseUrl: string; configured: boolean; source: Source; savedKeys: AiProviderName[]; timeoutSeconds: number | null };
   services: ReviewService[];
   /** The signing secret of a review service, or null. */
   serviceSecret(id: string): string | null;
@@ -106,7 +106,8 @@ export function buildResolved(config: IntegrationConfig, secrets: IntegrationSec
   const aiModel = (aiFromSettings ? config.ai?.model : env.ai.model) ?? '';
   // Parallel's address comes only from the environment; a compatible server's from the settings.
   const aiBaseUrl = (aiFromSettings ? (aiProvider === 'parallel' ? env.ai.baseUrl : config.ai?.baseUrl) : env.ai.baseUrl) ?? '';
-  const aiSettings = { provider: aiProvider, apiKey: aiKey, processor, model: aiModel || undefined, baseUrl: aiBaseUrl || undefined };
+  const aiTimeout = aiFromSettings ? config.ai?.timeoutSeconds : undefined;
+  const aiSettings = { provider: aiProvider, apiKey: aiKey, processor, model: aiModel || undefined, baseUrl: aiBaseUrl || undefined, timeoutSeconds: aiTimeout };
   const ai = buildAiProvider(aiSettings, fetchImpl ?? fetch);
   const savedKeys = (['parallel', 'anthropic', 'openai', 'openai_compatible'] as const).filter((p) => !!savedAiKey(secrets, p));
 
@@ -127,6 +128,7 @@ export function buildResolved(config: IntegrationConfig, secrets: IntegrationSec
       configured: aiConfigured(aiSettings),
       source: aiFromSettings ? 'settings' : env.ai.provider !== 'off' ? 'env' : 'none',
       savedKeys,
+      timeoutSeconds: aiTimeout ?? null,
     },
     services,
     serviceSecret: (id) => serviceSecrets[id] ?? null,
