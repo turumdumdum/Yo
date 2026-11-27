@@ -102,7 +102,7 @@ export function RequestList({ requests, userId, awaitingMyAnswer, nameOf, busy, 
 
   return (
     <>
-      <div className="view-tiles" role="group" aria-label="Show" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
+      <div className="view-tiles" role="group" aria-label="Show" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))' }}>
         {MAIN_VIEWS.map((v) => (
           <button key={v.id} type="button" className="view-tile" data-view={v.id} aria-pressed={view === v.id} onClick={() => setView(v.id)}>
             <span className="view-icon" aria-hidden="true">

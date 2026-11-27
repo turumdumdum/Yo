@@ -191,7 +191,9 @@ const SLA: Series[] = [
 
 const listSummary = (rows: Row[]) => (rows.length ? rows.map((r) => `${r.label}: ${r.values[0]}`).join('; ') : 'No data in this period.');
 
-function compute(data: { requests: MetricsRequest[]; exceptions: MetricsException[] }, period: PeriodId) {
+function compute(raw: { requests: MetricsRequest[]; exceptions: MetricsException[] }, period: PeriodId) {
+  // A request whose stages are not readable comes back without the list; count it with none.
+  const data = { ...raw, requests: raw.requests.map((r) => ({ ...r, request_stages: r.request_stages ?? [] })) };
   const now = Date.now();
   const spec = PERIODS.find((p) => p.id === period)!;
   const cutoff = spec.days === null ? null : now - spec.days * DAY;

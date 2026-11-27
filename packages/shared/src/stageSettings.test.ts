@@ -47,12 +47,6 @@ describe('workflow settings', () => {
     [(s: ReturnType<typeof defaultWorkflowSettings>) => (s['IT review']!.slaBusinessDays = 0), /1 to 60 business days/],
     [(s: ReturnType<typeof defaultWorkflowSettings>) => (s['IT review']!.checklist = ['  ']), /checklist item/],
     [(s: ReturnType<typeof defaultWorkflowSettings>) => (s['IT review']!.onlyWhen = { field: 'paymentType', in: [] }), /which answers/],
-    [
-      (s: ReturnType<typeof defaultWorkflowSettings>) => {
-        for (const stage of Object.values(s)) stage.requirement = 'by_risk';
-      },
-      /At least one review must always be needed/,
-    ],
   ])('reject broken settings #%#', (breakIt, message) => {
     const settings = defaultWorkflowSettings();
     breakIt(settings);
@@ -60,5 +54,13 @@ describe('workflow settings', () => {
     expect('error' in result && result.error).toMatch(message);
     // Broken stored settings never break submission.
     expect(workflowFromSettings(settings)).toBe(DEFAULT_WORKFLOW);
+  });
+});
+
+describe('reviews that are all off', () => {
+  it('are allowed: such requests are approved on submission', () => {
+    const settings = defaultWorkflowSettings();
+    for (const stage of Object.values(settings)) stage.requirement = 'never';
+    expect('settings' in parseWorkflowSettings(settings)).toBe(true);
   });
 });

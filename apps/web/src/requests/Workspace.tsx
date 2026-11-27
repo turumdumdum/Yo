@@ -19,6 +19,7 @@ import {
 } from './api';
 import { HowItWorks } from './HowItWorks';
 import { RequestList } from './RequestList';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { RequestDetail } from './RequestDetail';
 import { RequestForm } from './RequestForm';
 import { ReviewQueue } from './ReviewQueue';
@@ -236,14 +237,16 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
     return (
       <>
         {banner}
-        <RequestDetail
-          key={open.request.id}
-          supabase={supabase}
-          request={open.request}
-          context={context}
-          initialStageId={open.stageId}
-          onClose={close}
-        />
+        <ErrorBoundary resetKey={open.request.id}>
+          <RequestDetail
+            key={open.request.id}
+            supabase={supabase}
+            request={open.request}
+            context={context}
+            initialStageId={open.stageId}
+            onClose={close}
+          />
+        </ErrorBoundary>
       </>
     );
   }
@@ -321,6 +324,7 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
       </div>
       <FormError message={error} />
 
+      <ErrorBoundary resetKey={tab}>
       {tab === 'catalog' && (
         <VendorCatalog
           supabase={supabase}
@@ -401,6 +405,7 @@ export function Workspace({ supabase, user, membership, onOrganizationChanged }:
       )}
 
       {tab === 'requests' && requests !== null && <HowItWorks compact={requests.length > 0} />}
+      </ErrorBoundary>
     </>
   );
 }

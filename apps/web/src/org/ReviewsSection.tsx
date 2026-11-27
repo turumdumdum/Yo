@@ -516,6 +516,11 @@ export function ReviewsSection({ supabase, orgId, onOpenIntegrations }: { supaba
           {notice}
         </p>
       )}
+      {settings && DEFAULT_STAGES.every((st) => settings[st]?.requirement === 'never') && (
+        <p className="notice" role="status">
+          Every review is off: requests are approved as soon as they are submitted.
+        </p>
+      )}
       {!settings ? (
         <p role="status">Loading…</p>
       ) : (

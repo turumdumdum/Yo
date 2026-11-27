@@ -174,10 +174,7 @@ export function parseWorkflowSettings(input: unknown): { settings: WorkflowSetti
       guide: guide.trim(),
     };
   }
-  // Every request needs at least one review, or it would never get a decision.
-  if (!Object.values(settings).some((s) => s.requirement === 'always' && s.onlyWhen === null)) {
-    return { error: 'At least one review must always be needed, without a condition, so that every request gets a decision' };
-  }
+  // Any review may be off. A request that needs no review is approved on submission.
   return { settings };
 }
 

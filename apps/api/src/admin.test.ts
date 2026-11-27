@@ -213,10 +213,10 @@ describe('review settings API', () => {
   it('explains broken settings and refuses requesters', async () => {
     const { app, workflows } = setup(orgAdmin);
     const stages = defaultWorkflowSettings();
-    for (const s of Object.values(stages)) s.requirement = 'never';
+    stages['IT review']!.slaBusinessDays = 0;
     const res = await put(app, { stages });
     expect(res.status).toBe(422);
-    expect(((await res.json()) as { error: string }).error).toMatch(/At least one review must always be needed/);
+    expect(((await res.json()) as { error: string }).error).toMatch(/1 to 60 business days/);
     expect(workflows).toEqual([]);
     expect((await put(setup({ ...orgAdmin, role: 'requester' }).app, { stages: defaultWorkflowSettings() })).status).toBe(403);
   });

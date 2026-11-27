@@ -10,15 +10,23 @@ interface Props {
   fields?: readonly string[];
 }
 
-/** All answers grouped by form step. */
+const isEmpty = (value: unknown) =>
+  value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+
+/**
+ * All answers grouped by form step. Read-only (no onEdit), unanswered optional questions
+ * are listed in one quiet line instead of a row of dashes each.
+ */
 export function AnswerSummary({ answers, onEdit, form: ownForm, fields }: Props) {
   const form = ownForm ?? DEFAULT_REQUEST_FORM;
   const only = fields ? new Set(fields) : null;
   return (
     <>
       {form.steps.map((step, index) => {
-        const shown = visibleFields(index, answers, form).filter((f) => !only || only.has(f.key));
-        return shown.length === 0 ? null : (
+        const all = visibleFields(index, answers, form).filter((f) => !only || only.has(f.key));
+        const shown = onEdit ? all : all.filter((f) => !isEmpty(answers[f.key]));
+        const unanswered = onEdit ? [] : all.filter((f) => isEmpty(answers[f.key]));
+        return all.length === 0 ? null : (
         <section key={step.title} className="summary-section" aria-label={step.title}>
           <div className="summary-head">
             <h3>{step.title}</h3>
@@ -36,6 +44,9 @@ export function AnswerSummary({ answers, onEdit, form: ownForm, fields }: Props)
               </div>
             ))}
           </dl>
+          {unanswered.length > 0 && (
+            <p className="field-hint summary-unanswered">Not answered: {unanswered.map((f) => f.label).join(', ')}</p>
+          )}
         </section>
         );
       })}
